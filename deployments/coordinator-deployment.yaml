@@ -4,7 +4,7 @@ metadata:
   name: misterpvc
 spec:
   accessModes:
-    - ReadWriteMany
+  - ReadWriteMany
   resources:
      requests:
        storage: 5Gi
@@ -30,29 +30,31 @@ spec:
         persistentVolumeClaim:
           claimName: misterpvc
       containers:
-        - name: coordinator
-          image: coordinator:1
-          volumeMounts:
-            - mountPath: /files
-              name: files
-          ports:
-            - containerPort: 1234
+      - name: coordinator
+        image: coordinator:1
+        volumeMounts:
+        - mountPath: /files
+          name: files
+        ports:
+        - containerPort: 1234
       initContainers:
-        - name: init-coordinator
-          image: coordinator:1
-          command: ['sh', '-c', 'mv /tmp/mister-files/* /files/']
-          volumeMounts:
-            - mountPath: /files
-              name: files
+      - name: init-coordinator
+        image: coordinator:1
+        command: ['sh', '-c', 'mv /tmp/mister-files/* /files/']
+        volumeMounts:
+        - mountPath: /files
+          name: files
 ---
-# apiVersion: v1
-# kind: Service
-# metadata:
-#   name: coordinator
-#   labels:
-#     app: coordinator
-# spec:
-#   type: NodePort
-#   ports:
-#     - port: 1234
-#       protocol: TCP
+apiVersion: v1
+kind: Service
+metadata:
+  name: coordinator
+  labels:
+    app: coordinator
+spec:
+  selector:
+    app: coordinator
+  ports:
+  - port: 1234
+    targetPort: 1234
+    protocol: TCP

@@ -23,18 +23,12 @@ type App interface {
 func RegisterApp(app App) {
 	phase := os.Getenv("MISTER_WORKER_PHASE")
 	podname := os.Getenv("MISTER_POD_NAME")
-	partitions, err := strconv.Atoi(os.Getenv("MISTER_PARTITIONS"))
+	reducers, err := strconv.Atoi(os.Getenv("MISTER_REDUCERS"))
 	if err != nil {
-		log.Fatal("Cannot parse MISTER_PARTITIONS environment variable: ", err)
+		log.Fatal("Cannot parse MISTER_REDUCERS environment variable: ", err)
 	}
-	worker := NewWorker(app, phase, podname, partitions)
+	worker := NewWorker(app, phase, podname, reducers)
 	worker.Run()
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// worker.Start()
-	// fmt.Println(mapped)
-	// CallSendJob()
 }
 
 type Job struct {

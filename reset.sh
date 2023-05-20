@@ -4,3 +4,4 @@ kubectl delete --all services && \
    kubectl delete --all pods && \
    kubectl delete --all pvc && \
    kubectl delete --all pv
+kubectl get all

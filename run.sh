@@ -9,4 +9,4 @@ cd ~/code/mister-apps/wordcount
 CGO_ENABLED=0 GOOS=linux go build -o bin/mr-wordcount -a
 docker build . -t wordcount:1
 minikube image load wordcount:1
-kubectl create clusterrolebinding default-view --clusterrole=admin --serviceaccount=default:default
+# kubectl create clusterrolebinding default-view --clusterrole=admin --serviceaccount=default:default

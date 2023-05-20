@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
-	"io/ioutil"
+	"io"
 	"log"
 	"os"
 	"strconv"
@@ -12,18 +12,18 @@ import (
 )
 
 type Worker struct {
-	App        App
-	Name       string
-	Partitions int
-	Phase      string
+	App      App
+	Name     string
+	Reducers int
+	Phase    string
 }
 
-func NewWorker(app App, phase string, podname string, partitions int) Worker {
+func NewWorker(app App, phase string, podname string, reducers int) Worker {
 	return Worker{
-		App:        app,
-		Name:       podname,
-		Partitions: partitions,
-		Phase:      phase,
+		App:      app,
+		Name:     podname,
+		Reducers: reducers,
+		Phase:    phase,
 	}
 }
 
@@ -37,7 +37,7 @@ func (worker *Worker) Run() {
 
 func (worker *Worker) RunMapLoop() {
 	for {
-		task, found, done, err := CallGetMapTask()
+		task, found, done, err := worker.CallGetMapTask()
 		if err != nil {
 			fmt.Println(err)
 			continue
@@ -55,32 +55,28 @@ func (worker *Worker) RunMapLoop() {
 
 func (worker *Worker) RunMapTask(task MapTask) {
 	input := readFile(task.InputFile)
-	fmt.Println(input)
 	intermediates := map[int][]KeyValue{}
 	kva := worker.App.Map(task.InputFile, input)
 	for _, entry := range kva {
-		bucket := spread(entry.Key, task.SpreadOver)
+		bucket := spread(entry.Key, task.Reducers)
 		intermediates[bucket] = append(intermediates[bucket], entry)
 	}
 	for bucket, data := range intermediates {
-		iname := "/files/inter-" + task.Uid + "-" + strconv.Itoa(bucket)
+		iname := "/files/intermediate/" + task.Uid + "-" + strconv.Itoa(bucket)
 		ifile, _ := os.Create(iname)
 		for _, entry := range data {
 			fmt.Fprintf(ifile, "%v %v\n", entry.Key, entry.Value)
 		}
 		ifile.Close()
 	}
-	// CallNotifyCompleted(task.Uid)
-
+	worker.CallNotifyCompleted(task.Uid)
 }
 
 func (worker *Worker) RunReduceLoop() {
 }
 
-func CallGetMapTask() (MapTask, bool, bool, error) {
-	// declare an argument structure.
-	args := struct{}{}
-	// declare a reply structure.
+func (worker *Worker) CallGetMapTask() (MapTask, bool, bool, error) {
+	args := GetMapTaskArgs{Worker: worker.Name}
 	reply := GetMapTaskReply{}
 
 	ok := call("Coordinator.GetMapTask", &args, &reply)
@@ -90,10 +86,32 @@ func CallGetMapTask() (MapTask, bool, bool, error) {
 	return reply.MapTask, reply.Found, reply.Done, nil
 }
 
+func (worker *Worker) CallNotifyCompleted(uid string) {
+	args := NotifyCompoletedArgs{Uid: uid}
+	reply := &Stub{}
+
+	ok := call("Coordinator.NotifyCompleted", &args, &reply)
+	if !ok {
+		log.Fatal("could not notify completion")
+	}
+}
+
 type MapTask struct {
-	Uid        string
-	InputFile  string
-	SpreadOver int
+	Uid       string
+	InputFile string
+	Reducers  int
+	Worker    string
+	Started   int64
+}
+
+type NotifyCompoletedArgs struct {
+	Uid string
+}
+
+type Stub struct{}
+
+type GetMapTaskArgs struct {
+	Worker string
 }
 
 type GetMapTaskReply struct {
@@ -107,7 +125,7 @@ func readFile(filename string) string {
 	if err != nil {
 		log.Fatalf("cannot open %v", filename)
 	}
-	content, err := ioutil.ReadAll(input)
+	content, err := io.ReadAll(input)
 	input.Close()
 	if err != nil {
 		log.Fatalf("cannot read %v", filename)
