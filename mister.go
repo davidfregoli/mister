@@ -7,7 +7,6 @@ import (
 	"net/rpc"
 	"os"
 	"strconv"
-	"time"
 )
 
 type KeyValue struct {
@@ -24,8 +23,8 @@ func RegisterApp(app App) {
 	phase := os.Getenv("MISTER_WORKER_PHASE")
 	podname := os.Getenv("MISTER_POD_NAME")
 	reducers, err := strconv.Atoi(os.Getenv("MISTER_REDUCERS"))
-	if err != nil {
-		log.Fatal("Cannot parse MISTER_REDUCERS environment variable: ", err)
+	if phase == "map" && err != nil {
+		log.Fatal("Cannot parse MISTER_REDUCERS environment variable: ", err, phase)
 	}
 	worker := NewWorker(app, phase, podname, reducers)
 	worker.Run()
@@ -62,11 +61,9 @@ func CallSendJob() error {
 // usually returns true.
 // returns false if something goes wrong.
 func call(rpcname string, args interface{}, reply interface{}) bool {
-	time.Sleep(time.Second * 5)
 	c, err := rpc.DialHTTP("tcp", "coordinator:1234")
 	if err != nil {
-		fmt.Println("Server shutdown or unreachable.")
-		os.Exit(0)
+		log.Fatal("Server shutdown or unreachable.")
 	}
 	defer c.Close()
 

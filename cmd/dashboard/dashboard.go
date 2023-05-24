@@ -3,15 +3,27 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
+	"net/http"
 
-	apps "k8s.io/api/apps/v1"
-	api "k8s.io/api/core/v1"
+	"fregoli.dev/mister"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
 
+type User struct {
+	Name string
+}
+
 func main() {
+	a := mister.GetReduceTaskReply{}
+	fmt.Println(a)
+	http.HandleFunc("/", handler)
+	log.Fatal(http.ListenAndServe(":80", nil))
+}
+
+func handler(w http.ResponseWriter, r *http.Request) {
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		panic(err.Error())
@@ -20,42 +32,22 @@ func main() {
 	if err != nil {
 		panic(err.Error())
 	}
-	deploymentsClient := clientset.AppsV1().Deployments("default")
-	deployment := &apps.Deployment{
-		ObjectMeta: meta.ObjectMeta{
-			Name: "wordcount",
-		},
-		Spec: apps.DeploymentSpec{
-			Replicas: int32Ptr(2),
-			Selector: &meta.LabelSelector{
-				MatchLabels: map[string]string{
-					"app": "wordcount",
-				},
-			},
-			Template: api.PodTemplateSpec{
-				ObjectMeta: meta.ObjectMeta{
-					Labels: map[string]string{
-						"app": "wordcount",
-					},
-				},
-				Spec: api.PodSpec{
-					Containers: []api.Container{
-						{
-							Name:  "wordcount",
-							Image: "wordcount:1",
-							Ports: []api.ContainerPort{},
-						},
-					},
-				},
-			},
-		},
-	}
-	fmt.Println("Creating deployment...")
-	result, err := deploymentsClient.Create(context.TODO(), deployment, meta.CreateOptions{})
+	pods, err := clientset.CoreV1().Pods("default").List(context.TODO(), meta.ListOptions{})
 	if err != nil {
-		panic(err)
+		panic(err.Error())
 	}
-	fmt.Printf("Created deployment %q.\n", result.GetObjectMeta().GetName())
+	for _, pod := range pods.Items {
+		fmt.Fprintf(w, "Pod name:%s", pod.Name)
+	}
+	// t, err := template.ParseFiles("templates/index.gohtml")
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// err = t.Execute(w, struct {
+	// 	Name string
+	// 	Flag bool
+	// }{Name: "David"})
+	// if err != nil {
+	// 	panic(err)
+	// }
 }
-
-func int32Ptr(i int32) *int32 { return &i }
