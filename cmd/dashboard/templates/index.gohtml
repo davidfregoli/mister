@@ -1,12 +1,80 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-<head>
-	<title>Mister Dashboard</title>
-	<script>
-		console.log('scripts ok')
-	</script>
-</head>
-<body>
-	<h1>Welcome!</h1>
-</body>
+	<head>
+		<title>Mister Dashboard</title>
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<link
+			rel="stylesheet"
+			href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0-alpha3/css/bootstrap.min.css"
+			integrity="sha512-iGjGmwIm1UHNaSuwiNFfB3+HpzT/YLJMiYPKzlQEVpT6FWi5rfpbyrBuTPseScOCWBkRtsrRIbrTzJpQ02IaLA=="
+			crossorigin="anonymous"
+			referrerpolicy="no-referrer"
+		/>
+		<link
+			rel="stylesheet"
+			href="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.6/dist/dist/vis-network.min.css"
+			integrity="sha512-WgxfT5LWjfszlPHXRmBWHkV2eceiWTOBvrKCNbdgDYTHrT2AeLCGbF4sZlZw3UMN3WtL0tGUoIAKsu8mllg/XA=="
+			crossorigin="anonymous"
+			referrerpolicy="no-referrer"
+		/>
+	</head>
+	<body style="padding-top:100px">
+		<nav class="navbar fixed-top bg-primary">
+			<div class="container-fluid" style="background: url('https://i.imgur.com/OBhO8ds.png') no-repeat right center;margin-right: 12px;">
+				<a class="navbar-brand text-light" href="#">Mister - Distributed MapReduce Framework</a>
+				<div class="collapse navbar-collapse"></div>
+				<small style="margin:auto 45px auto auto;color:white;font-weight:bold">v0.0.1</small>
+			</div>
+		</nav>
+		<div class="container">
+			<h1>Welcome!</h1>
+			<h4>Here are the pods:</h4>
+			<ul class="list-group">
+				{{ range .Items }}
+					<li class="list-group-item">
+						{{ .Name }} -
+						{{ index .Annotations "mr-queue" }}
+					</li>
+				{{ end }}
+			</ul>
+			<div id="visualiser" style=" width: 100%; height: 800px; border: 1px solid lightgray;"></div>
+		</div>
+		<script
+			src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0-alpha3/js/bootstrap.bundle.min.js"
+			integrity="sha512-vIAkTd3Ary9rwf0lrb9kIipyIkavKpYGnyopBXs6SiLfNSzAvCNvvQvKwBV5Xlag4O8oZpZ5U5n4bHoErGQxjw=="
+			crossorigin="anonymous"
+			referrerpolicy="no-referrer"
+		></script>
+		<script
+			src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.6/dist/vis-network.min.js"
+			integrity="sha512-SQxRbs2KrIjJrZUgYoZg4VYCEucBBCHdYJPcKBU5AmDmwj272WPIxr6B6MMsRxg//JX9ZAJRNgwyiHNeYnv2UQ=="
+			crossorigin="anonymous"
+			referrerpolicy="no-referrer"
+		></script>
+		<script
+			src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.0/jquery.min.js"
+			integrity="sha512-3gJwYpMe3QewGELv8k/BX9vcqhryRdzRMxVfq6ngyWXwo03GFEzjsUm8Q7RZcHPHksttq7/GFoxjCVUjkjvPdw=="
+			crossorigin="anonymous"
+			referrerpolicy="no-referrer"
+		></script>
+		<script>
+			(async function () {
+				const data = await $.get("/api/job");
+				let workers = new Set();
+				data.forEach((task) => workers.add(task.Worker));
+				workers = Array.from(workers);
+				let dataset = [{ id: "coordinator", label: "COORDINATOR", shape: "box", x: 400, y: 10 }];
+				data.forEach((task, i) => dataset.push({ id: task.InputFile, label: task.InputFile, shape: "box", x: 0, y: 50 + i * 50 }));
+				workers.forEach((worker, i) => dataset.push({ id: worker, label: worker, x: 250, y: 200 + i * 100 }));
+				var nodes = new vis.DataSet(dataset);
+				dataset = [];
+				workers.forEach((worker) => dataset.push({ from: "coordinator", to: worker }));
+				data.forEach((task) => dataset.push({ from: task.InputFile, to: task.Worker }));
+				var edges = new vis.DataSet(dataset);
+				var container = document.getElementById("visualiser");
+				var options = { nodes, edges };
+				network = new vis.Network(container, options, { physics: { enabled: false } });
+			})();
+		</script>
+	</body>
 </html>

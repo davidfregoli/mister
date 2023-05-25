@@ -42,6 +42,9 @@ type SendJobArgs struct {
 type SendJobReply struct {
 	Uid int
 }
+type GetJobMapsReply struct {
+	Maps []MapTask
+}
 
 func CallSendJob() error {
 	// declare an argument structure.
@@ -57,13 +60,24 @@ func CallSendJob() error {
 	return nil
 }
 
+func CallGetJobMaps() ([]MapTask, error) {
+	args := Stub{}
+	reply := GetJobMapsReply{}
+	ok := call("Coordinator.GetJobMaps", &args, &reply)
+	if !ok {
+		return nil, errors.New("cannot get job maps")
+	}
+	return reply.Maps, nil
+}
+
 // send an RPC request to the coordinator, wait for the response.
 // usually returns true.
 // returns false if something goes wrong.
 func call(rpcname string, args interface{}, reply interface{}) bool {
 	c, err := rpc.DialHTTP("tcp", "coordinator:1234")
 	if err != nil {
-		log.Fatal("Server shutdown or unreachable.")
+		fmt.Println("Server shutdown or unreachable.")
+		return false
 	}
 	defer c.Close()
 

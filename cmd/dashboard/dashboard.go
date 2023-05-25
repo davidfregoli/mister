@@ -2,28 +2,35 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"html/template"
 	"log"
 	"net/http"
 
-	"fregoli.dev/mister"
+	mr "fregoli.dev/mister"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
 
-type User struct {
-	Name string
-}
-
 func main() {
-	a := mister.GetReduceTaskReply{}
-	fmt.Println(a)
 	http.HandleFunc("/", handler)
+	http.HandleFunc("/api/job", getJob)
 	log.Fatal(http.ListenAndServe(":80", nil))
 }
 
+func getJob(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	maps, err := mr.CallGetJobMaps()
+	if err != nil {
+		json.NewEncoder(w).Encode(struct{ Error string }{Error: err.Error()})
+	}
+	json.NewEncoder(w).Encode(maps)
+}
+
 func handler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		panic(err.Error())
@@ -36,18 +43,15 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		panic(err.Error())
 	}
-	for _, pod := range pods.Items {
-		fmt.Fprintf(w, "Pod name:%s", pod.Name)
+	t, err := template.ParseFiles("templates/index.gohtml")
+	if err != nil {
+		panic(err)
 	}
-	// t, err := template.ParseFiles("templates/index.gohtml")
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// err = t.Execute(w, struct {
-	// 	Name string
-	// 	Flag bool
-	// }{Name: "David"})
-	// if err != nil {
-	// 	panic(err)
-	// }
+	for _, pod := range pods.Items {
+		fmt.Println("annotations: ", pod.GetAnnotations())
+	}
+	err = t.Execute(w, pods)
+	if err != nil {
+		panic(err)
+	}
 }

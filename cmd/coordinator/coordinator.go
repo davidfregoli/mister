@@ -36,11 +36,27 @@ type Coordinator struct {
 	ReduceRunners   []*mr.ReduceTask
 	ReduceRunnersMx sync.RWMutex
 	TaskCounter     int64
-	CompletedMaps   []string
+	CompletedMaps   []*mr.MapTask
 	CompletedMapsMx sync.RWMutex
 }
 
-type MapQueue []mr.MapTask
+func (c *Coordinator) GetJobMaps(args *mr.Stub, reply *mr.GetJobMapsReply) error {
+	c.MapQueueMx.RLock()
+	c.MapRunnersMx.RLock()
+	c.CompletedMapsMx.RLock()
+	defer c.MapQueueMx.RUnlock()
+	defer c.MapRunnersMx.RUnlock()
+	defer c.CompletedMapsMx.RUnlock()
+	all := []*mr.MapTask{}
+	all = append(all, c.MapQueue...)
+	all = append(all, c.MapRunners...)
+	all = append(all, c.CompletedMaps...)
+	reply.Maps = []mr.MapTask{}
+	for _, task := range all {
+		reply.Maps = append(reply.Maps, *task)
+	}
+	return nil
+}
 
 func (c *Coordinator) GetMapTask(args *mr.GetMapTaskArgs, reply *mr.GetMapTaskReply) error {
 	c.MapQueueMx.Lock()
@@ -52,6 +68,7 @@ func (c *Coordinator) GetMapTask(args *mr.GetMapTaskArgs, reply *mr.GetMapTaskRe
 		return nil
 	}
 	task := c.MapQueue[0]
+	task.State = "running"
 	c.MapQueue = c.MapQueue[1:]
 	task.Reducers = c.Reducers
 	task.Worker = args.Worker
@@ -59,8 +76,40 @@ func (c *Coordinator) GetMapTask(args *mr.GetMapTaskArgs, reply *mr.GetMapTaskRe
 	c.MapRunners = append(c.MapRunners, task)
 	reply.Found = true
 	reply.MapTask = *task
+
+	go c.annotateWorker(task.Worker, task.InputFile)
 	fmt.Println(task.Uid, " to ", task.Worker)
 	return nil
+}
+
+func (c *Coordinator) annotateWorker(podName string, filename string) {
+	// creates the in-cluster config
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		panic(err.Error())
+	}
+	// creates the clientset
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		panic(err.Error())
+	}
+	pod, err := clientset.CoreV1().Pods("default").Get(context.TODO(), podName, meta.GetOptions{})
+	if err != nil {
+		panic(err.Error())
+	}
+	key := "mr-queue"
+	ants := pod.GetAnnotations()
+	if ants == nil {
+		ants = map[string]string{}
+	}
+	old, ok := pod.Annotations[key]
+	if !ok {
+		ants[key] = filename
+	} else {
+		ants[key] = old + ";" + filename
+	}
+	pod.SetAnnotations(ants)
+	clientset.CoreV1().Pods("default").Update(context.TODO(), pod, meta.UpdateOptions{})
 }
 
 func (c *Coordinator) GetReduceTask(args *mr.GetReduceTaskArgs, reply *mr.GetReduceTaskReply) error {
@@ -91,7 +140,8 @@ func (c *Coordinator) NotifyCompletedMap(args *mr.NotifyCompoletedArgs, reply *m
 	for i, task := range c.MapRunners {
 		if task.Uid == args.Uid {
 			c.CompletedMapsMx.Lock()
-			c.CompletedMaps = append(c.CompletedMaps, task.Uid)
+			task.State = "done"
+			c.CompletedMaps = append(c.CompletedMaps, task)
 			c.CompletedMapsMx.Unlock()
 			continue
 		}
@@ -183,8 +233,8 @@ func (c *Coordinator) Shuffle() {
 		bucket := strconv.Itoa(i)
 		inputFiles := []string{}
 		outputFile := c.Path + "output/" + bucket
-		for _, uid := range c.CompletedMaps {
-			path := c.Path + "intermediate/" + uid + "-" + bucket
+		for _, task := range c.CompletedMaps {
+			path := c.Path + "intermediate/" + task.Uid + "-" + bucket
 			_, err := os.Stat(path)
 			if err != nil {
 				continue
@@ -232,16 +282,23 @@ func (c *Coordinator) CreateJob() error {
 		c.MapQueue[i] = &mr.MapTask{
 			Uid:       strconv.FormatInt(uid, 10),
 			InputFile: path,
+			State:     "idle",
 		}
 	}
 	return nil
 }
 
 func (c *Coordinator) SpawnMappers() {
-	// creates the in-cluster config
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		panic(err.Error())
+	var config *rest.Config
+	for {
+		var err error
+		// creates the in-cluster config
+		config, err = rest.InClusterConfig()
+		if err != nil {
+			time.Sleep(time.Second)
+		} else {
+			break
+		}
 	}
 	// creates the clientset
 	clientset, err := kubernetes.NewForConfig(config)
