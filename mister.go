@@ -30,6 +30,8 @@ func RegisterApp(app App) {
 	worker.Run()
 }
 
+type Task interface{}
+
 type Job struct {
 	MCount int
 	RCount int

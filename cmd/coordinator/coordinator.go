@@ -27,58 +27,101 @@ type Coordinator struct {
 	Phase           string
 	Mappers         int
 	Reducers        int
-	MapQueue        []*mr.MapTask
-	MapQueueMx      sync.RWMutex
-	MapRunners      []*mr.MapTask
-	MapRunnersMx    sync.RWMutex
+	MapTasks        []mr.MapTask
+	MapTasksMx      sync.RWMutex
+	MapQueue        chan *mr.MapTask
+	MapRunners      sync.Map
 	ReduceQueue     []*mr.ReduceTask
 	ReduceQueueMx   sync.RWMutex
 	ReduceRunners   []*mr.ReduceTask
 	ReduceRunnersMx sync.RWMutex
 	TaskCounter     int64
-	CompletedMaps   []*mr.MapTask
-	CompletedMapsMx sync.RWMutex
+	CompletedMaps   chan *mr.MapTask
 }
 
-func (c *Coordinator) GetJobMaps(args *mr.Stub, reply *mr.GetJobMapsReply) error {
-	c.MapQueueMx.RLock()
-	c.MapRunnersMx.RLock()
-	c.CompletedMapsMx.RLock()
-	defer c.MapQueueMx.RUnlock()
-	defer c.MapRunnersMx.RUnlock()
-	defer c.CompletedMapsMx.RUnlock()
-	all := []*mr.MapTask{}
-	all = append(all, c.MapQueue...)
-	all = append(all, c.MapRunners...)
-	all = append(all, c.CompletedMaps...)
-	reply.Maps = []mr.MapTask{}
-	for _, task := range all {
-		reply.Maps = append(reply.Maps, *task)
+func main() {
+	cord := new(Coordinator)
+
+	cord.Phase = "map"
+	err := cord.CreateJob()
+	if err != nil {
+		log.Fatal(err)
+	}
+	cord.SpawnMappers()
+
+	go cord.Loop()
+
+	rpc.Register(cord)
+	rpc.HandleHTTP()
+	l, e := net.Listen("tcp", ":1234")
+	if e != nil {
+		log.Fatal("listen error:", e)
+	}
+	http.Serve(l, nil)
+}
+
+func (c *Coordinator) CreateJob() error {
+	job := struct {
+		Mappers  int
+		Reducers int
+		Path     string
+	}{
+		Mappers:  4,
+		Reducers: 2,
+		Path:     "/files/",
+	}
+	c.Mappers = job.Mappers
+	c.Reducers = job.Reducers
+	c.Path = job.Path
+	inputPath := c.Path + "input/"
+	files, err := os.ReadDir(inputPath)
+	if err != nil {
+		return err
+	}
+	c.MapQueue = make(chan *mr.MapTask, len(files))
+	c.CompletedMaps = make(chan *mr.MapTask, len(files))
+	c.MapTasks = make([]mr.MapTask, len(files))
+	for i, file := range files {
+		uid := atomic.AddInt64(&c.TaskCounter, 1)
+		path := inputPath + file.Name()
+		if err != nil {
+			return err
+		}
+		task := mr.MapTask{
+			Uid:       strconv.FormatInt(uid, 10),
+			InputFile: path,
+			Status:    "idle",
+		}
+		c.MapTasks[i] = task
+		c.MapQueue <- &c.MapTasks[i]
 	}
 	return nil
 }
 
+func (c *Coordinator) GetJobMaps(args *mr.Stub, reply *mr.GetJobMapsReply) error {
+	c.MapTasksMx.RLock()
+	reply.Maps = c.MapTasks
+	c.MapTasksMx.RUnlock()
+	return nil
+}
+
 func (c *Coordinator) GetMapTask(args *mr.GetMapTaskArgs, reply *mr.GetMapTaskReply) error {
-	c.MapQueueMx.Lock()
-	defer c.MapQueueMx.Unlock()
-	c.MapRunnersMx.Lock()
-	defer c.MapRunnersMx.Unlock()
 	if len(c.MapQueue) == 0 {
-		reply.Done = len(c.MapRunners) == 0
+		reply.Done = len(c.CompletedMaps) == len(c.MapTasks)
 		return nil
 	}
-	task := c.MapQueue[0]
-	task.State = "running"
-	c.MapQueue = c.MapQueue[1:]
+	task := <-c.MapQueue
+	c.MapTasksMx.Lock()
+	task.Status = "running"
 	task.Reducers = c.Reducers
 	task.Worker = args.Worker
 	task.Started = time.Now().Unix()
-	c.MapRunners = append(c.MapRunners, task)
+	c.MapTasksMx.Unlock()
+	c.MapRunners.Store(args.Worker, task)
 	reply.Found = true
 	reply.MapTask = *task
 
-	go c.annotateWorker(task.Worker, task.InputFile)
-	fmt.Println(task.Uid, " to ", task.Worker)
+	log.Println("Assigning Map task " + task.Uid + " to worker " + task.Worker)
 	return nil
 }
 
@@ -132,23 +175,17 @@ func (c *Coordinator) GetReduceTask(args *mr.GetReduceTaskArgs, reply *mr.GetRed
 }
 
 func (c *Coordinator) NotifyCompletedMap(args *mr.NotifyCompoletedArgs, reply *mr.Stub) error {
-	c.MapRunnersMx.Lock()
-	defer c.MapRunnersMx.Unlock()
-	nu := make([]*mr.MapTask, len(c.MapRunners)-1)
-	j := 0
 	fmt.Println("from: ", args.Worker)
-	for i, task := range c.MapRunners {
-		if task.Uid == args.Uid {
-			c.CompletedMapsMx.Lock()
-			task.State = "done"
-			c.CompletedMaps = append(c.CompletedMaps, task)
-			c.CompletedMapsMx.Unlock()
-			continue
-		}
-		nu[j] = c.MapRunners[i]
-		j++
+	worker := args.Worker
+	anyTask, loaded := c.MapRunners.LoadAndDelete(worker)
+	if !loaded {
+		log.Fatal("cannot retrieve task for worker " + worker)
 	}
-	c.MapRunners = nu
+	task := anyTask.(*mr.MapTask)
+	c.MapTasksMx.Lock()
+	task.Status = "completed"
+	c.MapTasksMx.Unlock()
+	c.CompletedMaps <- task
 	return nil
 }
 
@@ -169,13 +206,7 @@ func (c *Coordinator) NotifyCompletedReduce(args *mr.NotifyCompoletedArgs, reply
 }
 
 func (c *Coordinator) CheckMapDone() bool {
-	c.MapQueueMx.RLock()
-	defer c.MapQueueMx.RUnlock()
-	c.MapRunnersMx.RLock()
-	defer c.MapRunnersMx.RUnlock()
-	emptyQueue := len(c.MapQueue) == 0
-	emptyRunners := len(c.MapRunners) == 0
-	return emptyQueue && emptyRunners
+	return len(c.CompletedMaps) == len(c.MapTasks)
 }
 
 func (c *Coordinator) CheckReduceDone() bool {
@@ -186,27 +217,6 @@ func (c *Coordinator) CheckReduceDone() bool {
 	emptyQueue := len(c.ReduceQueue) == 0
 	emptyRunners := len(c.ReduceRunners) == 0
 	return emptyQueue && emptyRunners
-}
-
-func main() {
-	cord := new(Coordinator)
-
-	cord.Phase = "map"
-	err := cord.CreateJob()
-	if err != nil {
-		log.Fatal(err)
-	}
-	cord.SpawnMappers()
-
-	go cord.Loop()
-
-	rpc.Register(cord)
-	rpc.HandleHTTP()
-	l, e := net.Listen("tcp", ":1234")
-	if e != nil {
-		log.Fatal("listen error:", e)
-	}
-	http.Serve(l, nil)
 }
 
 func (c *Coordinator) Loop() {
@@ -227,13 +237,12 @@ func (c *Coordinator) Loop() {
 }
 
 func (c *Coordinator) Shuffle() {
-	c.CompletedMapsMx.RLock()
-	defer c.CompletedMapsMx.RUnlock()
+	log.Println("shufflin")
 	for i := 0; i < c.Reducers; i++ {
 		bucket := strconv.Itoa(i)
 		inputFiles := []string{}
 		outputFile := c.Path + "output/" + bucket
-		for _, task := range c.CompletedMaps {
+		for _, task := range c.MapTasks {
 			path := c.Path + "intermediate/" + task.Uid + "-" + bucket
 			_, err := os.Stat(path)
 			if err != nil {
@@ -252,40 +261,6 @@ func (c *Coordinator) Shuffle() {
 		}
 		c.ReduceQueue = append(c.ReduceQueue, &task)
 	}
-}
-
-func (c *Coordinator) CreateJob() error {
-	job := struct {
-		Mappers  int
-		Reducers int
-		Path     string
-	}{
-		Mappers:  4,
-		Reducers: 2,
-		Path:     "/files/",
-	}
-	c.Mappers = job.Mappers
-	c.Reducers = job.Reducers
-	c.Path = job.Path
-	inputPath := c.Path + "input/"
-	files, err := os.ReadDir(inputPath)
-	if err != nil {
-		return err
-	}
-	c.MapQueue = make([]*mr.MapTask, len(files))
-	for i, file := range files {
-		uid := atomic.AddInt64(&c.TaskCounter, 1)
-		path := inputPath + file.Name()
-		if err != nil {
-			return err
-		}
-		c.MapQueue[i] = &mr.MapTask{
-			Uid:       strconv.FormatInt(uid, 10),
-			InputFile: path,
-			State:     "idle",
-		}
-	}
-	return nil
 }
 
 func (c *Coordinator) SpawnMappers() {

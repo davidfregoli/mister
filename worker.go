@@ -183,7 +183,7 @@ type MapTask struct {
 	Started   int64
 	Uid       string
 	Worker    string
-	State     string
+	Status    string
 }
 
 type ReduceTask struct {
