@@ -23,20 +23,21 @@ import (
 )
 
 type Coordinator struct {
-	Path            string
-	Phase           string
-	Mappers         int
-	Reducers        int
-	MapTasks        []mr.MapTask
-	MapTasksMx      sync.RWMutex
-	MapQueue        chan *mr.MapTask
-	MapRunners      sync.Map
-	ReduceQueue     []*mr.ReduceTask
-	ReduceQueueMx   sync.RWMutex
-	ReduceRunners   []*mr.ReduceTask
-	ReduceRunnersMx sync.RWMutex
-	TaskCounter     int64
-	CompletedMaps   chan *mr.MapTask
+	TaskCounter      int64
+	Path             string
+	Phase            string
+	Mappers          int
+	Reducers         int
+	MapTasks         []mr.MapTask
+	MapTasksMx       sync.RWMutex
+	MapQueue         chan *mr.MapTask
+	MapRunners       sync.Map
+	CompletedMaps    int64
+	ReduceTasks      []mr.ReduceTask
+	ReduceTasksMx    sync.RWMutex
+	ReduceQueue      chan *mr.ReduceTask
+	ReduceRunners    sync.Map
+	CompletedReduces int64
 }
 
 func main() {
@@ -79,7 +80,6 @@ func (c *Coordinator) CreateJob() error {
 		return err
 	}
 	c.MapQueue = make(chan *mr.MapTask, len(files))
-	c.CompletedMaps = make(chan *mr.MapTask, len(files))
 	c.MapTasks = make([]mr.MapTask, len(files))
 	for i, file := range files {
 		uid := atomic.AddInt64(&c.TaskCounter, 1)
@@ -87,12 +87,11 @@ func (c *Coordinator) CreateJob() error {
 		if err != nil {
 			return err
 		}
-		task := mr.MapTask{
+		c.MapTasks[i] = mr.MapTask{
 			Uid:       strconv.FormatInt(uid, 10),
 			InputFile: path,
 			Status:    "idle",
 		}
-		c.MapTasks[i] = task
 		c.MapQueue <- &c.MapTasks[i]
 	}
 	return nil
@@ -107,7 +106,7 @@ func (c *Coordinator) GetJobMaps(args *mr.Stub, reply *mr.GetJobMapsReply) error
 
 func (c *Coordinator) GetMapTask(args *mr.GetMapTaskArgs, reply *mr.GetMapTaskReply) error {
 	if len(c.MapQueue) == 0 {
-		reply.Done = len(c.CompletedMaps) == len(c.MapTasks)
+		reply.Done = int(c.CompletedMaps) == len(c.MapTasks)
 		return nil
 	}
 	task := <-c.MapQueue
@@ -115,7 +114,6 @@ func (c *Coordinator) GetMapTask(args *mr.GetMapTaskArgs, reply *mr.GetMapTaskRe
 	task.Status = "running"
 	task.Reducers = c.Reducers
 	task.Worker = args.Worker
-	task.Started = time.Now().Unix()
 	c.MapTasksMx.Unlock()
 	c.MapRunners.Store(args.Worker, task)
 	reply.Found = true
@@ -125,57 +123,25 @@ func (c *Coordinator) GetMapTask(args *mr.GetMapTaskArgs, reply *mr.GetMapTaskRe
 	return nil
 }
 
-func (c *Coordinator) annotateWorker(podName string, filename string) {
-	// creates the in-cluster config
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		panic(err.Error())
-	}
-	// creates the clientset
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		panic(err.Error())
-	}
-	pod, err := clientset.CoreV1().Pods("default").Get(context.TODO(), podName, meta.GetOptions{})
-	if err != nil {
-		panic(err.Error())
-	}
-	key := "mr-queue"
-	ants := pod.GetAnnotations()
-	if ants == nil {
-		ants = map[string]string{}
-	}
-	old, ok := pod.Annotations[key]
-	if !ok {
-		ants[key] = filename
-	} else {
-		ants[key] = old + ";" + filename
-	}
-	pod.SetAnnotations(ants)
-	clientset.CoreV1().Pods("default").Update(context.TODO(), pod, meta.UpdateOptions{})
-}
-
 func (c *Coordinator) GetReduceTask(args *mr.GetReduceTaskArgs, reply *mr.GetReduceTaskReply) error {
-	c.ReduceQueueMx.Lock()
-	defer c.ReduceQueueMx.Unlock()
-	c.ReduceRunnersMx.Lock()
-	defer c.ReduceRunnersMx.Unlock()
 	if len(c.ReduceQueue) == 0 {
-		reply.Done = len(c.ReduceRunners) == 0
+		reply.Done = int(c.CompletedReduces) == len(c.ReduceTasks)
 		return nil
 	}
-	task := c.ReduceQueue[0]
-	c.ReduceQueue = c.ReduceQueue[1:]
+	task := <-c.ReduceQueue
+	c.ReduceTasksMx.Lock()
+	task.Status = "running"
 	task.Worker = args.Worker
-	task.Started = time.Now().Unix()
-	c.ReduceRunners = append(c.ReduceRunners, task)
+	c.ReduceTasksMx.Unlock()
+	c.ReduceRunners.Store(args.Worker, task)
 	reply.Found = true
 	reply.ReduceTask = *task
+
+	log.Println("Assigning Reduce task " + task.Uid + " to worker " + task.Worker)
 	return nil
 }
 
 func (c *Coordinator) NotifyCompletedMap(args *mr.NotifyCompoletedArgs, reply *mr.Stub) error {
-	fmt.Println("from: ", args.Worker)
 	worker := args.Worker
 	anyTask, loaded := c.MapRunners.LoadAndDelete(worker)
 	if !loaded {
@@ -185,38 +151,30 @@ func (c *Coordinator) NotifyCompletedMap(args *mr.NotifyCompoletedArgs, reply *m
 	c.MapTasksMx.Lock()
 	task.Status = "completed"
 	c.MapTasksMx.Unlock()
-	c.CompletedMaps <- task
+	atomic.AddInt64(&c.CompletedMaps, 1)
 	return nil
 }
 
 func (c *Coordinator) NotifyCompletedReduce(args *mr.NotifyCompoletedArgs, reply *mr.Stub) error {
-	c.ReduceRunnersMx.Lock()
-	defer c.ReduceRunnersMx.Unlock()
-	nu := make([]*mr.ReduceTask, len(c.ReduceRunners)-1)
-	j := 0
-	for i, task := range c.ReduceRunners {
-		if task.Uid == args.Uid {
-			continue
-		}
-		nu[j] = c.ReduceRunners[i]
-		j++
+	worker := args.Worker
+	anyTask, loaded := c.ReduceRunners.LoadAndDelete(worker)
+	if !loaded {
+		log.Fatal("cannot retrieve task for worker " + worker)
 	}
-	c.ReduceRunners = nu
+	task := anyTask.(*mr.ReduceTask)
+	c.ReduceTasksMx.Lock()
+	task.Status = "completed"
+	c.ReduceTasksMx.Unlock()
+	atomic.AddInt64(&c.CompletedReduces, 1)
 	return nil
 }
 
 func (c *Coordinator) CheckMapDone() bool {
-	return len(c.CompletedMaps) == len(c.MapTasks)
+	return int(c.CompletedMaps) == len(c.MapTasks)
 }
 
 func (c *Coordinator) CheckReduceDone() bool {
-	c.ReduceQueueMx.RLock()
-	defer c.ReduceQueueMx.RUnlock()
-	c.ReduceRunnersMx.RLock()
-	defer c.ReduceRunnersMx.RUnlock()
-	emptyQueue := len(c.ReduceQueue) == 0
-	emptyRunners := len(c.ReduceRunners) == 0
-	return emptyQueue && emptyRunners
+	return int(c.CompletedReduces) == len(c.ReduceTasks)
 }
 
 func (c *Coordinator) Loop() {
@@ -231,6 +189,13 @@ func (c *Coordinator) Loop() {
 			c.Phase = "reduce"
 			c.Shuffle()
 			c.SpawnReducers()
+		} else if c.Phase == "reduce" {
+			done := c.CheckReduceDone()
+			if !done {
+				continue
+			}
+			c.Phase = "idle"
+			log.Println(("job completed"))
 			break
 		}
 	}
@@ -238,6 +203,8 @@ func (c *Coordinator) Loop() {
 
 func (c *Coordinator) Shuffle() {
 	log.Println("shufflin")
+	c.ReduceTasks = make([]mr.ReduceTask, c.Reducers)
+	c.ReduceQueue = make(chan *mr.ReduceTask, c.Reducers)
 	for i := 0; i < c.Reducers; i++ {
 		bucket := strconv.Itoa(i)
 		inputFiles := []string{}
@@ -254,12 +221,12 @@ func (c *Coordinator) Shuffle() {
 			continue
 		}
 		uid := atomic.AddInt64(&c.TaskCounter, 1)
-		task := mr.ReduceTask{
+		c.ReduceTasks[i] = mr.ReduceTask{
 			Uid:        strconv.FormatInt(uid, 10),
 			InputFiles: inputFiles,
 			OutputFile: outputFile,
 		}
-		c.ReduceQueue = append(c.ReduceQueue, &task)
+		c.ReduceQueue <- &c.ReduceTasks[i]
 	}
 }
 

@@ -180,7 +180,6 @@ func (worker *Worker) CallNotifyCompletedReduce(uid string) {
 type MapTask struct {
 	InputFile string
 	Reducers  int
-	Started   int64
 	Uid       string
 	Worker    string
 	Status    string
@@ -190,8 +189,8 @@ type ReduceTask struct {
 	Uid        string
 	InputFiles []string
 	OutputFile string
-	Started    int64
 	Worker     string
+	Status     string
 }
 
 type NotifyCompoletedArgs struct {
