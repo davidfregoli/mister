@@ -22,11 +22,11 @@ func main() {
 
 func getJob(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	maps, err := mr.CallGetJobMaps()
+	job, err := mr.CallGetJob()
 	if err != nil {
 		json.NewEncoder(w).Encode(struct{ Error string }{Error: err.Error()})
 	}
-	json.NewEncoder(w).Encode(maps)
+	json.NewEncoder(w).Encode(job)
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {

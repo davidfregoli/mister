@@ -44,8 +44,9 @@ type SendJobArgs struct {
 type SendJobReply struct {
 	Uid int
 }
-type GetJobMapsReply struct {
-	Maps []MapTask
+type GetJobReply struct {
+	Maps    []MapTask
+	Reduces []ReduceTask
 }
 
 func CallSendJob() error {
@@ -62,14 +63,19 @@ func CallSendJob() error {
 	return nil
 }
 
-func CallGetJobMaps() ([]MapTask, error) {
+type JobState struct {
+	Maps     []MapTask
+	Redecues []ReduceTask
+}
+
+func CallGetJob() (GetJobReply, error) {
 	args := Stub{}
-	reply := GetJobMapsReply{}
-	ok := call("Coordinator.GetJobMaps", &args, &reply)
+	reply := GetJobReply{}
+	ok := call("Coordinator.GetJob", &args, &reply)
 	if !ok {
-		return nil, errors.New("cannot get job maps")
+		return GetJobReply{}, errors.New("cannot get job maps")
 	}
-	return reply.Maps, nil
+	return reply, nil
 }
 
 // send an RPC request to the coordinator, wait for the response.

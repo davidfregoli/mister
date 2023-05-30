@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -242,46 +241,4 @@ func ihash(key string) int {
 
 func spread(key string, reducers int) int {
 	return ihash(key) % reducers
-}
-
-type MapStorage struct {
-	l sync.RWMutex
-	m map[string]*MapTask
-}
-
-func (s *MapStorage) Set(key string, val *MapTask) {
-	s.l.Lock()
-	s.m[key] = val
-	s.l.Unlock()
-}
-
-func (s *MapStorage) Get(key string) *MapTask {
-	s.l.RLock()
-	defer s.l.RUnlock()
-	return s.m[key]
-}
-
-func NewMapStorage() MapStorage {
-	return MapStorage{m: map[string]*MapTask{}}
-}
-
-type ReduceStorage struct {
-	l sync.RWMutex
-	m map[string]*ReduceTask
-}
-
-func (s *ReduceStorage) Set(key string, val *ReduceTask) {
-	s.l.Lock()
-	s.m[key] = val
-	s.l.Unlock()
-}
-
-func (s *ReduceStorage) Get(key string) *ReduceTask {
-	s.l.RLock()
-	defer s.l.RUnlock()
-	return s.m[key]
-}
-
-func NewReduceStorage() ReduceStorage {
-	return ReduceStorage{m: map[string]*ReduceTask{}}
 }

@@ -50,22 +50,41 @@
 			referrerpolicy="no-referrer"
 		></script>
 		<script>
-			(async function () {
-				const data = await $.get("/api/job");
+			(async function refresh() {
+				let { Maps: mappers, Reduces: reducers } = await $.get("/api/job");
+				reducers = reducers || [];
 				let workers = new Set();
-				data.forEach((task) => workers.add(task.Worker));
+				mappers.sort((a, b) => (a.Worker < b.Worker ? -1 : 1));
+				mappers.forEach((task) => workers.add(task.Worker));
 				workers = Array.from(workers);
-				let dataset = [{ id: "coordinator", label: "COORDINATOR", shape: "box", x: 400, y: 10 }];
-				data.forEach((task, i) => dataset.push({ id: task.InputFile, label: task.InputFile, shape: "box", x: 0 }));
-				workers.forEach((worker, i) => dataset.push({ id: worker, label: worker, x: 250 }));
+				let dataset = [{ id: "coordinator", label: "COORDINATOR", shape: "circle", x: 400, y: 0 }];
+				mappers.forEach((task, i) => dataset.push({ id: task.InputFile, label: task.InputFile, shape: "box", x: 0, y: i * 50 + 100 }));
+				workers.forEach((worker, i) => dataset.push({ id: worker, label: worker, x: 250, y: i * 100 + 125 }));
+				reducers.forEach((reducer, i) => {
+					dataset.push({ id: `bucket-${i}`, label: `bucket #${i}`, shape: "database", x: 450, y: 150 * i + 200 });
+					if (!reducer.Worker) {
+						return;
+					}
+					dataset.push({ id: reducer.Worker, label: reducer.Worker, x: 625, y: 100 * i + 225 });
+					dataset.push({ id: `output-${i}`, label: `/files/output/${i}`, shape: "box", x: 800, y: 100 * i + 225 });
+				});
 				var nodes = new vis.DataSet(dataset);
 				dataset = [];
-				workers.forEach((worker) => dataset.push({ from: "coordinator", to: worker }));
-				data.forEach((task) => dataset.push({ from: task.InputFile, to: task.Worker }));
+				workers.forEach((worker) => {
+					dataset.push({ from: "coordinator", to: worker, dashes: true });
+					reducers.forEach((reducer, i) => dataset.push({ from: worker, to: `bucket-${i}`, arrows: "to" }));
+				});
+				mappers.forEach((task) => dataset.push({ from: task.InputFile, to: task.Worker, arrows: "to" }));
+				reducers.forEach((reducer, i) => {
+					dataset.push({ from: "coordinator", to: reducer.Worker, dashes: true });
+					dataset.push({ from: `bucket-${i}`, to: reducer.Worker, arrows: "to" });
+					dataset.push({ from: reducer.Worker, to: `output-${i}`, arrows: "to" });
+				});
 				var edges = new vis.DataSet(dataset);
 				var container = document.getElementById("visualiser");
 				var options = { nodes, edges };
 				network = new vis.Network(container, options, { physics: { enabled: false } });
+				setTimeout(refresh, 500);
 			})();
 		</script>
 	</body>

@@ -10,7 +10,6 @@ import (
 	"os"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	mr "fregoli.dev/mister"
@@ -23,42 +22,54 @@ import (
 )
 
 type Coordinator struct {
-	TaskCounter      int64
+	m                sync.Mutex
+	TaskCounter      int
 	Path             string
 	Phase            string
 	Mappers          int
 	Reducers         int
 	MapTasks         []mr.MapTask
-	MapTasksMx       sync.RWMutex
 	MapQueue         chan *mr.MapTask
-	MapRunners       mr.MapStorage
-	CompletedMaps    int64
+	MapRunners       map[string]*mr.MapTask
+	CompletedMaps    sync.WaitGroup
 	ReduceTasks      []mr.ReduceTask
-	ReduceTasksMx    sync.RWMutex
 	ReduceQueue      chan *mr.ReduceTask
-	ReduceRunners    mr.ReduceStorage
-	CompletedReduces int64
+	ReduceRunners    map[string]*mr.ReduceTask
+	CompletedReduces sync.WaitGroup
+}
+
+func (c *Coordinator) DoSync(job func()) {
+	c.m.Lock()
+	job()
+	c.m.Unlock()
 }
 
 func main() {
-	cord := new(Coordinator)
+	c := new(Coordinator)
 
-	cord.Phase = "map"
-	err := cord.CreateJob()
+	c.Phase = "map"
+	err := c.CreateJob()
 	if err != nil {
 		log.Fatal(err)
 	}
-	cord.SpawnMappers()
+	c.SpawnMappers()
 
-	go cord.Loop()
-
-	rpc.Register(cord)
+	rpc.Register(c)
 	rpc.HandleHTTP()
 	l, e := net.Listen("tcp", ":1234")
 	if e != nil {
 		log.Fatal("listen error:", e)
 	}
-	http.Serve(l, nil)
+	go http.Serve(l, nil)
+	c.CompletedMaps.Wait()
+	c.Phase = "reduce"
+	c.Shuffle()
+	c.SpawnReducers()
+	c.CompletedReduces.Wait()
+	log.Println(("job completed"))
+	for {
+		time.Sleep(time.Minute)
+	}
 }
 
 func (c *Coordinator) CreateJob() error {
@@ -81,42 +92,43 @@ func (c *Coordinator) CreateJob() error {
 	}
 	c.MapQueue = make(chan *mr.MapTask, len(files))
 	c.MapTasks = make([]mr.MapTask, len(files))
-	c.MapRunners = mr.NewMapStorage()
+	c.MapRunners = map[string]*mr.MapTask{}
 	for i, file := range files {
-		uid := atomic.AddInt64(&c.TaskCounter, 1)
+		c.TaskCounter += 1
 		path := inputPath + file.Name()
 		if err != nil {
 			return err
 		}
 		c.MapTasks[i] = mr.MapTask{
-			Uid:       strconv.FormatInt(uid, 10),
+			Uid:       strconv.Itoa(c.TaskCounter),
 			InputFile: path,
 			Status:    "idle",
 		}
 		c.MapQueue <- &c.MapTasks[i]
+		c.CompletedMaps.Add(1)
 	}
 	return nil
 }
 
-func (c *Coordinator) GetJobMaps(args *mr.Stub, reply *mr.GetJobMapsReply) error {
-	c.MapTasksMx.RLock()
-	reply.Maps = c.MapTasks
-	c.MapTasksMx.RUnlock()
+func (c *Coordinator) GetJob(args *mr.Stub, reply *mr.GetJobReply) error {
+	c.DoSync(func() {
+		reply.Maps = c.MapTasks
+		reply.Reduces = c.ReduceTasks
+	})
 	return nil
 }
 
 func (c *Coordinator) GetMapTask(args *mr.GetMapTaskArgs, reply *mr.GetMapTaskReply) error {
 	if len(c.MapQueue) == 0 {
-		reply.Done = int(c.CompletedMaps) == len(c.MapTasks)
 		return nil
 	}
 	task := <-c.MapQueue
-	c.MapTasksMx.Lock()
-	task.Status = "running"
-	task.Reducers = c.Reducers
-	task.Worker = args.Worker
-	c.MapTasksMx.Unlock()
-	c.MapRunners.Set(args.Worker, task)
+	c.DoSync(func() {
+		task.Status = "running"
+		task.Reducers = c.Reducers
+		task.Worker = args.Worker
+		c.MapRunners[args.Worker] = task
+	})
 	reply.Found = true
 	reply.MapTask = *task
 
@@ -126,15 +138,14 @@ func (c *Coordinator) GetMapTask(args *mr.GetMapTaskArgs, reply *mr.GetMapTaskRe
 
 func (c *Coordinator) GetReduceTask(args *mr.GetReduceTaskArgs, reply *mr.GetReduceTaskReply) error {
 	if len(c.ReduceQueue) == 0 {
-		reply.Done = int(c.CompletedReduces) == len(c.ReduceTasks)
 		return nil
 	}
 	task := <-c.ReduceQueue
-	c.ReduceTasksMx.Lock()
-	task.Status = "running"
-	task.Worker = args.Worker
-	c.ReduceTasksMx.Unlock()
-	c.ReduceRunners.Set(args.Worker, task)
+	c.DoSync(func() {
+		task.Status = "running"
+		task.Worker = args.Worker
+		c.ReduceRunners[args.Worker] = task
+	})
 	reply.Found = true
 	reply.ReduceTask = *task
 
@@ -143,62 +154,27 @@ func (c *Coordinator) GetReduceTask(args *mr.GetReduceTaskArgs, reply *mr.GetRed
 }
 
 func (c *Coordinator) NotifyCompletedMap(args *mr.NotifyCompoletedArgs, reply *mr.Stub) error {
-	worker := args.Worker
-	task := c.MapRunners.Get(worker)
-	c.MapTasksMx.Lock()
-	task.Status = "completed"
-	c.MapTasksMx.Unlock()
-	atomic.AddInt64(&c.CompletedMaps, 1)
+	c.DoSync(func() {
+		task := c.MapRunners[args.Worker]
+		task.Status = "completed"
+		c.CompletedMaps.Done()
+	})
 	return nil
 }
 
 func (c *Coordinator) NotifyCompletedReduce(args *mr.NotifyCompoletedArgs, reply *mr.Stub) error {
-	worker := args.Worker
-	task := c.ReduceRunners.Get(worker)
-	c.ReduceTasksMx.Lock()
-	task.Status = "completed"
-	c.ReduceTasksMx.Unlock()
-	atomic.AddInt64(&c.CompletedReduces, 1)
+	c.DoSync(func() {
+		task := c.ReduceRunners[args.Worker]
+		task.Status = "completed"
+		c.CompletedReduces.Done()
+	})
 	return nil
 }
 
-func (c *Coordinator) CheckMapDone() bool {
-	return int(c.CompletedMaps) == len(c.MapTasks)
-}
-
-func (c *Coordinator) CheckReduceDone() bool {
-	return int(c.CompletedReduces) == len(c.ReduceTasks)
-}
-
-func (c *Coordinator) Loop() {
-	ticker := time.NewTicker(200 * time.Millisecond)
-	for {
-		<-ticker.C
-		if c.Phase == "map" {
-			done := c.CheckMapDone()
-			if !done {
-				continue
-			}
-			c.Phase = "reduce"
-			c.Shuffle()
-			c.SpawnReducers()
-		} else if c.Phase == "reduce" {
-			done := c.CheckReduceDone()
-			if !done {
-				continue
-			}
-			c.Phase = "idle"
-			log.Println(("job completed"))
-			break
-		}
-	}
-}
-
 func (c *Coordinator) Shuffle() {
-	log.Println("shufflin")
 	c.ReduceTasks = make([]mr.ReduceTask, c.Reducers)
 	c.ReduceQueue = make(chan *mr.ReduceTask, c.Reducers)
-	c.ReduceRunners = mr.NewReduceStorage()
+	c.ReduceRunners = map[string]*mr.ReduceTask{}
 	for i := 0; i < c.Reducers; i++ {
 		bucket := strconv.Itoa(i)
 		inputFiles := []string{}
@@ -214,13 +190,14 @@ func (c *Coordinator) Shuffle() {
 		if len(inputFiles) == 0 {
 			continue
 		}
-		uid := atomic.AddInt64(&c.TaskCounter, 1)
+		c.TaskCounter += 1
 		c.ReduceTasks[i] = mr.ReduceTask{
-			Uid:        strconv.FormatInt(uid, 10),
+			Uid:        strconv.Itoa(c.TaskCounter),
 			InputFiles: inputFiles,
 			OutputFile: outputFile,
 		}
 		c.ReduceQueue <- &c.ReduceTasks[i]
+		c.CompletedReduces.Add(1)
 	}
 }
 
