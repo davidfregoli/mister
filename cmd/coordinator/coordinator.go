@@ -31,12 +31,12 @@ type Coordinator struct {
 	MapTasks         []mr.MapTask
 	MapTasksMx       sync.RWMutex
 	MapQueue         chan *mr.MapTask
-	MapRunners       sync.Map
+	MapRunners       mr.MapStorage
 	CompletedMaps    int64
 	ReduceTasks      []mr.ReduceTask
 	ReduceTasksMx    sync.RWMutex
 	ReduceQueue      chan *mr.ReduceTask
-	ReduceRunners    sync.Map
+	ReduceRunners    mr.ReduceStorage
 	CompletedReduces int64
 }
 
@@ -81,6 +81,7 @@ func (c *Coordinator) CreateJob() error {
 	}
 	c.MapQueue = make(chan *mr.MapTask, len(files))
 	c.MapTasks = make([]mr.MapTask, len(files))
+	c.MapRunners = mr.NewMapStorage()
 	for i, file := range files {
 		uid := atomic.AddInt64(&c.TaskCounter, 1)
 		path := inputPath + file.Name()
@@ -115,7 +116,7 @@ func (c *Coordinator) GetMapTask(args *mr.GetMapTaskArgs, reply *mr.GetMapTaskRe
 	task.Reducers = c.Reducers
 	task.Worker = args.Worker
 	c.MapTasksMx.Unlock()
-	c.MapRunners.Store(args.Worker, task)
+	c.MapRunners.Set(args.Worker, task)
 	reply.Found = true
 	reply.MapTask = *task
 
@@ -133,7 +134,7 @@ func (c *Coordinator) GetReduceTask(args *mr.GetReduceTaskArgs, reply *mr.GetRed
 	task.Status = "running"
 	task.Worker = args.Worker
 	c.ReduceTasksMx.Unlock()
-	c.ReduceRunners.Store(args.Worker, task)
+	c.ReduceRunners.Set(args.Worker, task)
 	reply.Found = true
 	reply.ReduceTask = *task
 
@@ -143,11 +144,7 @@ func (c *Coordinator) GetReduceTask(args *mr.GetReduceTaskArgs, reply *mr.GetRed
 
 func (c *Coordinator) NotifyCompletedMap(args *mr.NotifyCompoletedArgs, reply *mr.Stub) error {
 	worker := args.Worker
-	anyTask, loaded := c.MapRunners.LoadAndDelete(worker)
-	if !loaded {
-		log.Fatal("cannot retrieve task for worker " + worker)
-	}
-	task := anyTask.(*mr.MapTask)
+	task := c.MapRunners.Get(worker)
 	c.MapTasksMx.Lock()
 	task.Status = "completed"
 	c.MapTasksMx.Unlock()
@@ -157,11 +154,7 @@ func (c *Coordinator) NotifyCompletedMap(args *mr.NotifyCompoletedArgs, reply *m
 
 func (c *Coordinator) NotifyCompletedReduce(args *mr.NotifyCompoletedArgs, reply *mr.Stub) error {
 	worker := args.Worker
-	anyTask, loaded := c.ReduceRunners.LoadAndDelete(worker)
-	if !loaded {
-		log.Fatal("cannot retrieve task for worker " + worker)
-	}
-	task := anyTask.(*mr.ReduceTask)
+	task := c.ReduceRunners.Get(worker)
 	c.ReduceTasksMx.Lock()
 	task.Status = "completed"
 	c.ReduceTasksMx.Unlock()
@@ -205,6 +198,7 @@ func (c *Coordinator) Shuffle() {
 	log.Println("shufflin")
 	c.ReduceTasks = make([]mr.ReduceTask, c.Reducers)
 	c.ReduceQueue = make(chan *mr.ReduceTask, c.Reducers)
+	c.ReduceRunners = mr.NewReduceStorage()
 	for i := 0; i < c.Reducers; i++ {
 		bucket := strconv.Itoa(i)
 		inputFiles := []string{}
