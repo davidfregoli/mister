@@ -23,7 +23,7 @@
 			<div class="container-fluid" style="background: url('https://i.imgur.com/OBhO8ds.png') no-repeat right center;margin-right: 12px;">
 				<a class="navbar-brand text-light" href="#">Mister - Distributed MapReduce Framework</a>
 				<div class="collapse navbar-collapse"></div>
-				<small style="margin:auto 45px auto auto;color:white;font-weight:bold">v0.0.3</small>
+				<small style="margin:auto 45px auto auto;color:white;font-weight:bold">v0.0.4</small>
 			</div>
 		</nav>
 		<div class="container">
@@ -66,7 +66,7 @@
 						return;
 					}
 					dataset.push({ id: reducer.Worker, label: reducer.Worker, x: 625, y: 100 * i + 225 });
-					dataset.push({ id: `output-${i}`, label: `/files/output/${i}`, shape: "box", x: 800, y: 100 * i + 225 });
+					dataset.push({ id: `/files/output/${i}`, label: `/files/output/${i}`, shape: "box", x: 800, y: 100 * i + 225 });
 				});
 				var nodes = new vis.DataSet(dataset);
 				dataset = [];
@@ -78,12 +78,22 @@
 				reducers.forEach((reducer, i) => {
 					dataset.push({ from: "coordinator", to: reducer.Worker, dashes: true });
 					dataset.push({ from: `bucket-${i}`, to: reducer.Worker, arrows: "to" });
-					dataset.push({ from: reducer.Worker, to: `output-${i}`, arrows: "to" });
+					dataset.push({ from: reducer.Worker, to: `/files/output/${i}`, arrows: "to" });
 				});
 				var edges = new vis.DataSet(dataset);
 				var container = document.getElementById("visualiser");
 				var options = { nodes, edges };
 				network = new vis.Network(container, options, { physics: { enabled: false } });
+				network.on("click", ({ nodes }) => {
+					const [node] = nodes;
+					if (!node) {
+						return;
+					}
+					if (!node.startsWith("/files/")) {
+						return;
+					}
+					window.open(node, "_blank");
+				});
 				setTimeout(refresh, 500);
 			})();
 		</script>

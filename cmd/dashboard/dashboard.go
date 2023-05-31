@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"html/template"
 	"log"
 	"net/http"
@@ -15,8 +14,10 @@ import (
 )
 
 func main() {
-	http.HandleFunc("/", handler)
+	fs := http.FileServer(http.Dir("/files"))
+	http.Handle("/files/", http.StripPrefix("/files", fs))
 	http.HandleFunc("/api/job", getJob)
+	http.HandleFunc("/", handler)
 	log.Fatal(http.ListenAndServe(":80", nil))
 }
 
@@ -47,9 +48,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		panic(err)
 	}
-	for _, pod := range pods.Items {
-		fmt.Println("annotations: ", pod.GetAnnotations())
-	}
+	// for _, pod := range pods.Items {
+	// 	fmt.Println("annotations: ", pod.GetAnnotations())
+	// }
 	err = t.Execute(w, pods)
 	if err != nil {
 		panic(err)

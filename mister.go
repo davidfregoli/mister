@@ -30,42 +30,14 @@ func RegisterApp(app App) {
 	worker.Run()
 }
 
-type Task interface{}
-
 type Job struct {
 	MCount int
 	RCount int
 	Path   string
 }
-
-type SendJobArgs struct {
-	Job
-}
-type SendJobReply struct {
-	Uid int
-}
 type GetJobReply struct {
 	Maps    []MapTask
 	Reduces []ReduceTask
-}
-
-func CallSendJob() error {
-	// declare an argument structure.
-	args := SendJobArgs{Job{MCount: 10, RCount: 5, Path: "/mister"}}
-	// declare a reply structure.
-	reply := SendJobReply{}
-
-	ok := call("Coordinator.SendJob", &args, &reply)
-	if !ok {
-		return errors.New("cannot send completed tasks to server")
-	}
-	fmt.Println("rpc sent. uid: " + strconv.Itoa(reply.Uid))
-	return nil
-}
-
-type JobState struct {
-	Maps     []MapTask
-	Redecues []ReduceTask
 }
 
 func CallGetJob() (GetJobReply, error) {

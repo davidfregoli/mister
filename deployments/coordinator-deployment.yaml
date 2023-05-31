@@ -39,8 +39,7 @@ spec:
         - containerPort: 1234
       initContainers:
       - name: init-coordinator
-        image: coordinator:1
-        command: ['sh', '-c', 'mv /tmp/mister-files/* /files/']
+        image: fetch:1
         volumeMounts:
         - mountPath: /files
           name: files
@@ -75,9 +74,16 @@ spec:
       labels:
         app: dashboard
     spec:
+      volumes:
+      - name: files
+        persistentVolumeClaim:
+          claimName: misterpvc
       containers:
       - name: dashboard
         image: dashboard:1
+        volumeMounts:
+        - mountPath: /files
+          name: files
         ports:
         - containerPort: 80
 ---

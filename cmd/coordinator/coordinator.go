@@ -52,6 +52,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	log.Printf("Spawning %v Map workers\n", c.Mappers)
 	c.SpawnMappers()
 
 	rpc.Register(c)
@@ -62,11 +63,14 @@ func main() {
 	}
 	go http.Serve(l, nil)
 	c.CompletedMaps.Wait()
+	log.Println("Map Tasks completed")
 	c.Phase = "reduce"
 	c.Shuffle()
+	log.Printf("Spawning %v Reduce workers\n", c.Reducers)
 	c.SpawnReducers()
 	c.CompletedReduces.Wait()
-	log.Println(("job completed"))
+	log.Println("Reduce Tasks completed")
+	log.Println(("MapReduce Job completed"))
 	for {
 		time.Sleep(time.Minute)
 	}
@@ -119,7 +123,10 @@ func (c *Coordinator) GetJob(args *mr.Stub, reply *mr.GetJobReply) error {
 }
 
 func (c *Coordinator) GetMapTask(args *mr.GetMapTaskArgs, reply *mr.GetMapTaskReply) error {
+	log.Printf("Received a Map Task request by worker %v\n", args.Worker)
 	if len(c.MapQueue) == 0 {
+		log.Printf("No Map Task available to assign to worker %v\n", args.Worker)
+		reply.Done = true
 		return nil
 	}
 	task := <-c.MapQueue
@@ -132,12 +139,15 @@ func (c *Coordinator) GetMapTask(args *mr.GetMapTaskArgs, reply *mr.GetMapTaskRe
 	reply.Found = true
 	reply.MapTask = *task
 
-	log.Println("Assigning Map task " + task.Uid + " to worker " + task.Worker)
+	log.Printf("Assigning Map task %v to worker %v\n", task.InputFile, task.Worker)
 	return nil
 }
 
 func (c *Coordinator) GetReduceTask(args *mr.GetReduceTaskArgs, reply *mr.GetReduceTaskReply) error {
+	log.Printf("Received a Reduce Task request by worker %v\n", args.Worker)
 	if len(c.ReduceQueue) == 0 {
+		log.Printf("No Reduce Task available to assign to worker %v\n", args.Worker)
+		reply.Done = true
 		return nil
 	}
 	task := <-c.ReduceQueue
@@ -149,13 +159,14 @@ func (c *Coordinator) GetReduceTask(args *mr.GetReduceTaskArgs, reply *mr.GetRed
 	reply.Found = true
 	reply.ReduceTask = *task
 
-	log.Println("Assigning Reduce task " + task.Uid + " to worker " + task.Worker)
+	log.Printf("Assigning Reduce task %v to worker %v\n", task.OutputFile, task.Worker)
 	return nil
 }
 
 func (c *Coordinator) NotifyCompletedMap(args *mr.NotifyCompoletedArgs, reply *mr.Stub) error {
 	c.DoSync(func() {
 		task := c.MapRunners[args.Worker]
+		log.Printf("Received notification of completion for Map Task %v by worker %v\n", task.InputFile, args.Worker)
 		task.Status = "completed"
 		c.CompletedMaps.Done()
 	})
@@ -165,6 +176,7 @@ func (c *Coordinator) NotifyCompletedMap(args *mr.NotifyCompoletedArgs, reply *m
 func (c *Coordinator) NotifyCompletedReduce(args *mr.NotifyCompoletedArgs, reply *mr.Stub) error {
 	c.DoSync(func() {
 		task := c.ReduceRunners[args.Worker]
+		log.Printf("Received notification of completion for Reduce Task %v by worker %v\n", task.OutputFile, args.Worker)
 		task.Status = "completed"
 		c.CompletedReduces.Done()
 	})
