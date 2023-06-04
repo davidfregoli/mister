@@ -2,7 +2,6 @@ package mister
 
 import (
 	"errors"
-	"fmt"
 	"log"
 	"net/rpc"
 	"os"
@@ -30,11 +29,6 @@ func RegisterApp(app App) {
 	worker.Run()
 }
 
-type Job struct {
-	MCount int
-	RCount int
-	Path   string
-}
 type GetJobReply struct {
 	Maps    []MapTask
 	Reduces []ReduceTask
@@ -56,7 +50,7 @@ func CallGetJob() (GetJobReply, error) {
 func call(rpcname string, args interface{}, reply interface{}) bool {
 	c, err := rpc.DialHTTP("tcp", "coordinator:1234")
 	if err != nil {
-		fmt.Println("Server shutdown or unreachable.")
+		log.Println("Server shutdown or unreachable.")
 		return false
 	}
 	defer c.Close()
@@ -66,7 +60,7 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 		return true
 	}
 
-	fmt.Println(err)
+	log.Println(err)
 	return false
 }
 

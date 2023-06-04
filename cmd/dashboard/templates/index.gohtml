@@ -23,13 +23,26 @@
 			<div class="container-fluid" style="background: url('https://i.imgur.com/OBhO8ds.png') no-repeat right center;margin-right: 12px;">
 				<a class="navbar-brand text-light" href="#">Mister - Distributed MapReduce Framework</a>
 				<div class="collapse navbar-collapse"></div>
-				<small style="margin:auto 45px auto auto;color:white;font-weight:bold">v0.0.4</small>
+				<small style="margin:auto 45px auto auto;color:white;font-weight:bold">v0.0.5</small>
 			</div>
 		</nav>
 		<div class="container">
 			<h1>Welcome!</h1>
 			<h4>Here is the cluster:</h4>
 			<div id="visualiser" style=" width: 100%; height: 800px; border: 1px solid lightgray;"></div>
+		</div>
+		<div id="modal" class="modal fade" tabindex="-1" aria-labelledby="staticBackdropLabel" aria-hidden="true">
+			<div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+				<div class="modal-content">
+					<div class="modal-header">
+						<h5 class="modal-title">Modal title</h5>
+						<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+					</div>
+					<div class="modal-body">
+						<ul id="logs"></ul>
+					</div>
+				</div>
+			</div>
 		</div>
 		<script
 			src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0-alpha3/js/bootstrap.bundle.min.js"
@@ -84,18 +97,36 @@
 				var container = document.getElementById("visualiser");
 				var options = { nodes, edges };
 				network = new vis.Network(container, options, { physics: { enabled: false } });
-				network.on("click", ({ nodes }) => {
+				network.on("click", async ({ nodes }) => {
 					const [node] = nodes;
 					if (!node) {
 						return;
 					}
-					if (!node.startsWith("/files/")) {
-						return;
+					if (node === "coordinator") {
+						const data = await $.getJSON("/api/logs/coordinator");
+						const $logs = $("#logs");
+						$(data).each((i, line) => {
+							const $li = $("<li>", { text: line });
+							$logs.append($li);
+						});
+						modal.show();
 					}
-					window.open(node, "_blank");
+					if (node.startsWith("wordcount-")) {
+						const data = await $.getJSON("/api/logs/pod?podname=" + node);
+						const $logs = $("#logs");
+						$(data).each((i, line) => {
+							const $li = $("<li>", { text: line });
+							$logs.append($li);
+						});
+						modal.show();
+					}
+					if (node.startsWith("/files/")) {
+						window.open(node, "_blank");
+					}
 				});
 				setTimeout(refresh, 500);
 			})();
+			const modal = new bootstrap.Modal(document.getElementById("modal"), { keyboard: false });
 		</script>
 	</body>
 </html>

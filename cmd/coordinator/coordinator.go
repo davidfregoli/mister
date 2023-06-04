@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -278,7 +277,7 @@ func (c *Coordinator) SpawnMappers() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("Created job %q.\n", result.GetObjectMeta().GetName())
+	log.Printf("Created job %q.\n", result.GetObjectMeta().GetName())
 
 	// get pods in all the namespaces by omitting namespace
 	// Or specify namespace to get pods in particular namespace
@@ -286,7 +285,7 @@ func (c *Coordinator) SpawnMappers() {
 	if err != nil {
 		panic(err.Error())
 	}
-	fmt.Printf("There are %d pods in the cluster\n", len(pods.Items))
+	log.Printf("There are %d pods in the cluster\n", len(pods.Items))
 }
 
 func (c *Coordinator) SpawnReducers() {
@@ -345,7 +344,7 @@ func (c *Coordinator) SpawnReducers() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("Created job %q.\n", result.GetObjectMeta().GetName())
+	log.Printf("Created job %q.\n", result.GetObjectMeta().GetName())
 }
 
 func int32Ptr(i int32) *int32 { return &i }

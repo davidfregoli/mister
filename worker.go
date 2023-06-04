@@ -41,9 +41,9 @@ func (worker *Worker) Run() {
 func (worker *Worker) RunMapLoop() {
 	for {
 		task, found, done, err := worker.CallGetMapTask()
-		fmt.Println(task, found, done, err)
+		log.Println(task, found, done, err)
 		if err != nil {
-			fmt.Println(err)
+			log.Println(err)
 			continue
 		}
 		if done {
@@ -79,7 +79,7 @@ func (worker *Worker) RunMapTask(task MapTask) {
 
 func (worker *Worker) RunReduceLoop() {
 	task, found, done, err := worker.CallGetReduceTask()
-	fmt.Println(task, found, done, err)
+	log.Println(task, found, done, err)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func (worker *Worker) CallGetReduceTask() (ReduceTask, bool, bool, error) {
 func (worker *Worker) CallNotifyCompletedMap(uid string) {
 	args := NotifyCompoletedArgs{Uid: uid, Worker: worker.Name}
 	reply := &Stub{}
-	fmt.Println("notifying ", uid)
+	log.Println("notifying ", uid)
 
 	ok := call("Coordinator.NotifyCompletedMap", &args, &reply)
 	if !ok {
@@ -169,7 +169,7 @@ func (worker *Worker) CallNotifyCompletedMap(uid string) {
 func (worker *Worker) CallNotifyCompletedReduce(uid string) {
 	args := NotifyCompoletedArgs{Uid: uid, Worker: worker.Name}
 	reply := &Stub{}
-	fmt.Println("notifying ", uid)
+	log.Println("notifying ", uid)
 
 	ok := call("Coordinator.NotifyCompletedReduce", &args, &reply)
 	if !ok {
