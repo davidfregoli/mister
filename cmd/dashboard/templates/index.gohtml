@@ -3,6 +3,32 @@
 	<head>
 		<title>Mister Dashboard</title>
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<style>
+			.terminal {
+				color: #009600;
+				background: black;
+				font-family: monospace;
+			}
+			.terminal ul {
+				margin: 0;
+				padding: 0;
+				font-size: 14px;
+				list-style-type: none;
+			}
+			.terminal li {
+				display: flex;
+			}
+			.terminal li:before {
+				content: "- ";
+				flex-shrink: 0;
+				padding-right: 8px;
+			}
+			.terminal span {
+				opacity: 0.6;
+				flex-shrink: 0;
+				padding-right: 10px;
+			}
+		</style>
 		<link
 			rel="stylesheet"
 			href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0-alpha3/css/bootstrap.min.css"
@@ -32,13 +58,9 @@
 			<div id="visualiser" style=" width: 100%; height: 800px; border: 1px solid lightgray;"></div>
 		</div>
 		<div id="modal" class="modal fade" tabindex="-1" aria-labelledby="staticBackdropLabel" aria-hidden="true">
-			<div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+			<div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-xl">
 				<div class="modal-content">
-					<div class="modal-header">
-						<h5 class="modal-title">Modal title</h5>
-						<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-					</div>
-					<div class="modal-body">
+					<div class="modal-body terminal">
 						<ul id="logs"></ul>
 					</div>
 				</div>
@@ -105,19 +127,29 @@
 					if (node === "coordinator") {
 						const data = await $.getJSON("/api/logs/coordinator");
 						const $logs = $("#logs");
-						$(data).each((i, line) => {
-							const $li = $("<li>", { text: line });
-							$logs.append($li);
-						});
+						$logs.empty();
+						data
+							.filter((line) => line !== "")
+							.forEach((line) => {
+								const meta = line.substring(0, 20);
+								line = line.substring(20);
+								const $li = $("<li>", { html: [$("<span>", { text: meta }), line] });
+								$logs.append($li);
+							});
 						modal.show();
 					}
 					if (node.startsWith("wordcount-")) {
 						const data = await $.getJSON("/api/logs/pod?podname=" + node);
 						const $logs = $("#logs");
-						$(data).each((i, line) => {
-							const $li = $("<li>", { text: line });
-							$logs.append($li);
-						});
+						$logs.empty();
+						data
+							.filter((line) => line !== "")
+							.forEach((line) => {
+								const meta = line.substring(0, 20);
+								line = line.substring(20);
+								const $li = $("<li>", { html: [$("<span>", { text: meta }), line] });
+								$logs.append($li);
+							});
 						modal.show();
 					}
 					if (node.startsWith("/files/")) {
