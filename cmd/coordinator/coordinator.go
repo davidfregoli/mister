@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -22,6 +24,9 @@ import (
 
 type Coordinator struct {
 	m                sync.Mutex
+	Busy             bool
+	App              string
+	JobCounter       int
 	TaskCounter      int
 	Path             string
 	Phase            string
@@ -46,14 +51,6 @@ func (c *Coordinator) DoSync(job func()) {
 func main() {
 	c := new(Coordinator)
 
-	c.Phase = "map"
-	err := c.CreateJob()
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Printf("Spawning %v Map workers\n", c.Mappers)
-	c.SpawnMappers()
-
 	rpc.Register(c)
 	rpc.HandleHTTP()
 	l, e := net.Listen("tcp", ":1234")
@@ -61,6 +58,65 @@ func main() {
 		log.Fatal("listen error:", e)
 	}
 	go http.Serve(l, nil)
+	c.MakeJob(&mr.MakeJobArgs{Mappers: 4, Reducers: 2, Path: "/files/", App: "wordcount"}, &mr.Stub{})
+	for {
+		time.Sleep(time.Minute)
+	}
+}
+
+func (c *Coordinator) MakeJob(args *mr.MakeJobArgs, reply *mr.Stub) error {
+	var busy bool
+	c.DoSync(func() {
+		busy = c.Busy
+		c.Busy = true
+	})
+	if busy {
+		return errors.New("cluster is busy, cannot create a new job at this time")
+	}
+	c.JobCounter += 1
+	c.Phase = "map"
+	c.Mappers = args.Mappers
+	c.Reducers = args.Reducers
+	c.Path = args.Path
+	c.App = args.App
+
+	log.Printf("Initializing Job %v with App: %v (%v Mappers, %v Reducers)", c.JobCounter, c.App, c.Mappers, c.Reducers)
+
+	intermediatePath := fmt.Sprintf("/files/intermediate/%v/", c.JobCounter)
+	os.Mkdir(intermediatePath, os.ModePerm)
+
+	outputPath := fmt.Sprintf("/files/output/%v/", c.JobCounter)
+	os.Mkdir(outputPath, os.ModePerm)
+	inputPath := c.Path + "input/"
+	files, err := os.ReadDir(inputPath)
+	if err != nil {
+		return err
+	}
+
+	c.MapQueue = make(chan *mr.MapTask, len(files))
+	c.MapTasks = make([]mr.MapTask, len(files))
+	c.MapRunners = map[string]*mr.MapTask{}
+	for i, file := range files {
+		c.TaskCounter += 1
+		path := inputPath + file.Name()
+		if err != nil {
+			return err
+		}
+		c.MapTasks[i] = mr.MapTask{
+			Jid:       strconv.Itoa(c.JobCounter),
+			Uid:       strconv.Itoa(c.TaskCounter),
+			InputFile: path,
+			Status:    "idle",
+		}
+		c.MapQueue <- &c.MapTasks[i]
+		c.CompletedMaps.Add(1)
+	}
+	c.ReduceTasks = make([]mr.ReduceTask, c.Reducers)
+	c.ReduceQueue = make(chan *mr.ReduceTask, c.Reducers)
+	c.ReduceRunners = map[string]*mr.ReduceTask{}
+
+	log.Printf("Spawning %v Map workers\n", c.Mappers)
+	c.SpawnMappers()
 	c.CompletedMaps.Wait()
 	log.Println("Map Tasks completed")
 	c.Phase = "reduce"
@@ -69,10 +125,10 @@ func main() {
 	c.SpawnReducers()
 	c.CompletedReduces.Wait()
 	log.Println("Reduce Tasks completed")
-	log.Println(("MapReduce Job completed"))
-	for {
-		time.Sleep(time.Minute)
-	}
+	log.Printf("MapReduce Job %v completed\n", c.JobCounter)
+	log.Println("----")
+	c.DoSync(func() { c.Busy = false })
+	return nil
 }
 
 func (c *Coordinator) CreateJob() error {
@@ -117,12 +173,13 @@ func (c *Coordinator) GetJob(args *mr.Stub, reply *mr.GetJobReply) error {
 	c.DoSync(func() {
 		reply.Maps = c.MapTasks
 		reply.Reduces = c.ReduceTasks
+		reply.Done = !c.Busy
 	})
 	return nil
 }
 
 func (c *Coordinator) GetMapTask(args *mr.GetMapTaskArgs, reply *mr.GetMapTaskReply) error {
-	log.Printf("Received a Map Task request by worker %v\n", args.Worker)
+	log.Printf("Received a Map Task request from worker %v\n", args.Worker)
 	if len(c.MapQueue) == 0 {
 		log.Printf("No Map Task available to assign to worker %v\n", args.Worker)
 		reply.Done = true
@@ -143,7 +200,7 @@ func (c *Coordinator) GetMapTask(args *mr.GetMapTaskArgs, reply *mr.GetMapTaskRe
 }
 
 func (c *Coordinator) GetReduceTask(args *mr.GetReduceTaskArgs, reply *mr.GetReduceTaskReply) error {
-	log.Printf("Received a Reduce Task request by worker %v\n", args.Worker)
+	log.Printf("Received a Reduce Task request from worker %v\n", args.Worker)
 	if len(c.ReduceQueue) == 0 {
 		log.Printf("No Reduce Task available to assign to worker %v\n", args.Worker)
 		reply.Done = true
@@ -165,7 +222,7 @@ func (c *Coordinator) GetReduceTask(args *mr.GetReduceTaskArgs, reply *mr.GetRed
 func (c *Coordinator) NotifyCompletedMap(args *mr.NotifyCompoletedArgs, reply *mr.Stub) error {
 	c.DoSync(func() {
 		task := c.MapRunners[args.Worker]
-		log.Printf("Received notification of completion for Map Task %v by worker %v\n", task.InputFile, args.Worker)
+		log.Printf("Received notification of completion for Map Task %v from worker %v\n", task.InputFile, args.Worker)
 		task.Status = "completed"
 		c.CompletedMaps.Done()
 	})
@@ -175,7 +232,7 @@ func (c *Coordinator) NotifyCompletedMap(args *mr.NotifyCompoletedArgs, reply *m
 func (c *Coordinator) NotifyCompletedReduce(args *mr.NotifyCompoletedArgs, reply *mr.Stub) error {
 	c.DoSync(func() {
 		task := c.ReduceRunners[args.Worker]
-		log.Printf("Received notification of completion for Reduce Task %v by worker %v\n", task.OutputFile, args.Worker)
+		log.Printf("Received notification of completion for Reduce Task %v from worker %v\n", task.OutputFile, args.Worker)
 		task.Status = "completed"
 		c.CompletedReduces.Done()
 	})
@@ -183,15 +240,12 @@ func (c *Coordinator) NotifyCompletedReduce(args *mr.NotifyCompoletedArgs, reply
 }
 
 func (c *Coordinator) Shuffle() {
-	c.ReduceTasks = make([]mr.ReduceTask, c.Reducers)
-	c.ReduceQueue = make(chan *mr.ReduceTask, c.Reducers)
-	c.ReduceRunners = map[string]*mr.ReduceTask{}
 	for i := 0; i < c.Reducers; i++ {
 		bucket := strconv.Itoa(i)
 		inputFiles := []string{}
-		outputFile := c.Path + "output/" + bucket
+		outputFile := fmt.Sprintf("%voutput/%v/%v", c.Path, c.JobCounter, bucket)
 		for _, task := range c.MapTasks {
-			path := c.Path + "intermediate/" + task.Uid + "-" + bucket
+			path := fmt.Sprintf("%vintermediate/%v/%v-%v", c.Path, c.JobCounter, task.Uid, bucket)
 			_, err := os.Stat(path)
 			if err != nil {
 				continue
@@ -210,6 +264,28 @@ func (c *Coordinator) Shuffle() {
 		c.ReduceQueue <- &c.ReduceTasks[i]
 		c.CompletedReduces.Add(1)
 	}
+}
+
+func (c *Coordinator) Cleanup() {
+	var config *rest.Config
+	for {
+		var err error
+		// creates the in-cluster config
+		config, err = rest.InClusterConfig()
+		if err != nil {
+			time.Sleep(time.Second)
+		} else {
+			break
+		}
+	}
+	// creates the clientset
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		panic(err.Error())
+	}
+	batchClient := clientset.BatchV1().Jobs("default")
+	batchClient.Delete(context.TODO(), "wordcount-mapper", meta.DeleteOptions{})
+	batchClient.Delete(context.TODO(), "wordcount-reducer", meta.DeleteOptions{})
 }
 
 func (c *Coordinator) SpawnMappers() {
@@ -232,7 +308,7 @@ func (c *Coordinator) SpawnMappers() {
 	batchClient := clientset.BatchV1().Jobs("default")
 	job := &batch.Job{
 		ObjectMeta: meta.ObjectMeta{
-			Name: "wordcount-mapper",
+			Name: fmt.Sprintf("%v-%v-mapper", c.App, c.JobCounter),
 		},
 		Spec: batch.JobSpec{
 			Parallelism: int32Ptr(int32(c.Mappers)),
@@ -264,8 +340,8 @@ func (c *Coordinator) SpawnMappers() {
 								Name:      "files",
 								MountPath: "/files",
 							}},
-							Name:  "wordcount",
-							Image: "wordcount:1",
+							Name:  c.App,
+							Image: fmt.Sprintf("%v:1", c.App),
 						},
 					},
 					RestartPolicy: api.RestartPolicyNever,
@@ -278,14 +354,6 @@ func (c *Coordinator) SpawnMappers() {
 		panic(err)
 	}
 	log.Printf("Created job %q.\n", result.GetObjectMeta().GetName())
-
-	// get pods in all the namespaces by omitting namespace
-	// Or specify namespace to get pods in particular namespace
-	pods, err := clientset.CoreV1().Pods("default").List(context.TODO(), meta.ListOptions{})
-	if err != nil {
-		panic(err.Error())
-	}
-	log.Printf("There are %d pods in the cluster\n", len(pods.Items))
 }
 
 func (c *Coordinator) SpawnReducers() {
@@ -302,7 +370,7 @@ func (c *Coordinator) SpawnReducers() {
 	batchClient := clientset.BatchV1().Jobs("default")
 	job := &batch.Job{
 		ObjectMeta: meta.ObjectMeta{
-			Name: "wordcount-reducer",
+			Name: fmt.Sprintf("%v-%v-reducer", c.App, c.JobCounter),
 		},
 		Spec: batch.JobSpec{
 			Parallelism: int32Ptr(int32(c.Reducers)),
@@ -331,8 +399,8 @@ func (c *Coordinator) SpawnReducers() {
 								Name:      "files",
 								MountPath: "/files",
 							}},
-							Name:  "wordcount",
-							Image: "wordcount:1",
+							Name:  c.App,
+							Image: fmt.Sprintf("%v:1", c.App),
 						},
 					},
 					RestartPolicy: api.RestartPolicyNever,

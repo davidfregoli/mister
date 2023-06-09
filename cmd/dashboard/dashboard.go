@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 
 	mr "fregoli.dev/mister"
@@ -21,20 +22,49 @@ import (
 func main() {
 	fs := http.FileServer(http.Dir("/files"))
 	http.Handle("/files/", http.StripPrefix("/files", fs))
-	http.HandleFunc("/api/job", getJob)
+	http.HandleFunc("/api/job", jobHandler)
 	http.HandleFunc("/api/logs/pod", getPodLogs)
 	http.HandleFunc("/api/logs/coordinator", getCoordinatorLogs)
 	http.HandleFunc("/", handler)
 	log.Fatal(http.ListenAndServe(":80", nil))
 }
 
-func getJob(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	job, err := mr.CallGetJob()
-	if err != nil {
-		json.NewEncoder(w).Encode(struct{ Error string }{Error: err.Error()})
+func jobHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		job, err := mr.CallGetJob()
+		if err != nil {
+			json.NewEncoder(w).Encode(struct{ Error string }{Error: err.Error()})
+		}
+		json.NewEncoder(w).Encode(job)
+	case "POST":
+		params := r.URL.Query()
+		app, ok := params["app"]
+		if !ok {
+			log.Println("missing app query paramether")
+		}
+		mappersParam, ok := params["mappers"]
+		if !ok {
+			log.Println("missing mappers query paramether")
+		}
+		mappers, err := strconv.Atoi(mappersParam[0])
+		if err != nil {
+			log.Println("invalid mappers query paramether")
+		}
+		reducersParam, ok := params["reducers"]
+		if !ok {
+			log.Println("missing reducers query paramether")
+		}
+		reducers, err := strconv.Atoi(reducersParam[0])
+		if err != nil {
+			log.Println("invalid reducers query paramether")
+		}
+		err = mr.CallMakeJob(app[0], mappers, reducers)
+		if err != nil {
+			log.Println(err)
+		}
 	}
-	json.NewEncoder(w).Encode(job)
 }
 
 func getPodLogs(w http.ResponseWriter, r *http.Request) {

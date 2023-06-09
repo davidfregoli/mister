@@ -32,6 +32,7 @@ func RegisterApp(app App) {
 type GetJobReply struct {
 	Maps    []MapTask
 	Reduces []ReduceTask
+	Done    bool
 }
 
 func CallGetJob() (GetJobReply, error) {
@@ -42,6 +43,25 @@ func CallGetJob() (GetJobReply, error) {
 		return GetJobReply{}, errors.New("cannot get job maps")
 	}
 	return reply, nil
+}
+
+type MakeJobArgs struct {
+	Mappers  int
+	Reducers int
+	Path     string
+	App      string
+}
+
+func CallMakeJob(app string, mappers int, reducers int) error {
+	args := MakeJobArgs{
+		App:      app,
+		Mappers:  mappers,
+		Reducers: reducers,
+		Path:     "/files/",
+	}
+	reply := Stub{}
+	go call("Coordinator.MakeJob", &args, &reply)
+	return nil
 }
 
 // send an RPC request to the coordinator, wait for the response.

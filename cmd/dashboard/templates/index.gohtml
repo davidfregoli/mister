@@ -4,6 +4,9 @@
 		<title>Mister Dashboard</title>
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<style>
+			body {
+				padding-top: 72px;
+			}
 			.terminal {
 				color: #00eb00;
 				background: black;
@@ -28,6 +31,26 @@
 				flex-shrink: 0;
 				padding-right: 10px;
 			}
+			nav .container-fluid {
+				margin-right: 12px;
+				background: url("https://i.imgur.com/OBhO8ds.png") no-repeat right center;
+			}
+			.version {
+				color: white;
+				font-weight: bold;
+				margin: auto 45px auto auto;
+			}
+			fieldset > *:first-child {
+				padding-left: 0;
+			}
+			#visualiser {
+				width: 100%;
+				height: 800px;
+				border: 1px solid lightgray;
+			}
+			fieldset[disabled] * {
+				cursor: wait;
+			}
 		</style>
 		<link
 			rel="stylesheet"
@@ -44,18 +67,36 @@
 			referrerpolicy="no-referrer"
 		/>
 	</head>
-	<body style="padding-top:100px">
+	<body>
 		<nav class="navbar fixed-top bg-primary">
-			<div class="container-fluid" style="background: url('https://i.imgur.com/OBhO8ds.png') no-repeat right center;margin-right: 12px;">
+			<div class="container-fluid">
 				<a class="navbar-brand text-light" href="#">Mister - Distributed MapReduce Framework</a>
 				<div class="collapse navbar-collapse"></div>
-				<small style="margin:auto 45px auto auto;color:white;font-weight:bold">v0.0.5</small>
+				<small class="version">v0.0.6</small>
 			</div>
 		</nav>
 		<div class="container">
-			<h1>Welcome!</h1>
-			<h4>Here is the cluster:</h4>
-			<div id="visualiser" style=" width: 100%; height: 800px; border: 1px solid lightgray;"></div>
+			<form>
+				<fieldset disabled class="row mb-3 m-0">
+					<div class="input-group col">
+						<label class="input-group-text" for="inputGroupSelect01">App:</label>
+						<select class="form-select" id="inputGroupSelect01" name="app">
+							<option value="wordcount">wordcount</option>
+							<option value="indexer">indexer</option>
+						</select>
+					</div>
+					<div class="input-group col">
+						<label class="input-group-text" for="inputGroupSelect01">Mappers:</label>
+						<input class="form-control" type="number" name="mappers" value="4" />
+					</div>
+					<div class="input-group col">
+						<label class="input-group-text" for="inputGroupSelect01">Reducers:</label>
+						<input class="form-control" type="number" name="reducers" value="2" />
+					</div>
+					<button type="submit" class="btn btn-primary col-1">Start</button>
+				</fieldset>
+			</form>
+			<div id="visualiser"></div>
 		</div>
 		<div id="modal" class="modal fade" tabindex="-1" aria-labelledby="staticBackdropLabel" aria-hidden="true">
 			<div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-xl">
@@ -85,12 +126,16 @@
 			referrerpolicy="no-referrer"
 		></script>
 		<script>
-			(async function refresh() {
-				let { Maps: mappers, Reduces: reducers } = await $.get("/api/job");
+			async function refresh() {
+				let { Maps: mappers, Reduces: reducers, Done: done } = await $.get("/api/job");
 				reducers = reducers || [];
 				let workers = new Set();
 				mappers.sort((a, b) => (a.Worker < b.Worker ? -1 : 1));
-				mappers.forEach((task) => workers.add(task.Worker));
+				mappers.forEach((task) => {
+					if (task.Worker) {
+						workers.add(task.Worker);
+					}
+				});
 				workers = Array.from(workers);
 				let dataset = [{ id: "coordinator", label: "COORDINATOR", shape: "circle", x: 400, y: 0 }];
 				mappers.forEach((task, i) => dataset.push({ id: task.InputFile, label: task.InputFile, shape: "box", x: 0, y: i * 50 + 100 }));
@@ -101,7 +146,7 @@
 						return;
 					}
 					dataset.push({ id: reducer.Worker, label: reducer.Worker, x: 625, y: 100 * i + 225 });
-					dataset.push({ id: `/files/output/${i}`, label: `/files/output/${i}`, shape: "box", x: 800, y: 100 * i + 225 });
+					dataset.push({ id: reducer.OutputFile, label: reducer.OutputFile, shape: "box", x: 800, y: 100 * i + 225 });
 				});
 				var nodes = new vis.DataSet(dataset);
 				dataset = [];
@@ -109,16 +154,16 @@
 					dataset.push({ from: "coordinator", to: worker, dashes: true });
 					reducers.forEach((reducer, i) => dataset.push({ from: worker, to: `bucket-${i}`, arrows: "to" }));
 				});
-				mappers.forEach((task) => dataset.push({ from: task.InputFile, to: task.Worker, arrows: "to" }));
+				mappers.filter((task) => task.Worker).forEach((task) => dataset.push({ from: task.InputFile, to: task.Worker, arrows: "to" }));
 				reducers.forEach((reducer, i) => {
 					dataset.push({ from: "coordinator", to: reducer.Worker, dashes: true });
 					dataset.push({ from: `bucket-${i}`, to: reducer.Worker, arrows: "to" });
-					dataset.push({ from: reducer.Worker, to: `/files/output/${i}`, arrows: "to" });
+					dataset.push({ from: reducer.Worker, to: reducer.OutputFile, arrows: "to" });
 				});
 				var edges = new vis.DataSet(dataset);
 				var container = document.getElementById("visualiser");
 				var options = { nodes, edges };
-				network = new vis.Network(container, options, { physics: { enabled: false } });
+				const network = new vis.Network(container, options, { physics: { enabled: false } });
 				network.on("click", async ({ nodes }) => {
 					const [node] = nodes;
 					if (!node) {
@@ -156,9 +201,20 @@
 						window.open(node, "_blank");
 					}
 				});
+				$("fieldset").prop("disabled", !done);
+				if (!done) {
+					setTimeout(refresh, 500);
+				}
+			};
+			$("form").on("submit", async function (e) {
+				e.preventDefault();
+				const params =  $(this).serialize();
+				$("fieldset", this).prop("disabled", true);
+				await $.post(`/api/job?${params}`);
 				setTimeout(refresh, 500);
-			})();
+			});
 			const modal = new bootstrap.Modal(document.getElementById("modal"), { keyboard: false });
+			refresh();
 		</script>
 	</body>
 </html>

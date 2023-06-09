@@ -40,6 +40,7 @@ func (worker *Worker) Run() {
 
 func (worker *Worker) RunMapLoop() {
 	for {
+		log.Println("Polling Coordinator for Map Task")
 		task, found, done, err := worker.CallGetMapTask()
 		if err != nil {
 			log.Printf("Unable to fetch Map Task. Error: %v", err)
@@ -69,7 +70,7 @@ func (worker *Worker) RunMapTask(task MapTask) {
 		intermediates[bucket] = append(intermediates[bucket], entry)
 	}
 	for bucket, data := range intermediates {
-		iname := "/files/intermediate/" + task.Uid + "-" + strconv.Itoa(bucket)
+		iname := "/files/intermediate/" + task.Jid + "/" + task.Uid + "-" + strconv.Itoa(bucket)
 		ifile, _ := os.Create(iname)
 		for _, entry := range data {
 			fmt.Fprintf(ifile, "%v %v\n", entry.Key, entry.Value)
@@ -80,6 +81,7 @@ func (worker *Worker) RunMapTask(task MapTask) {
 }
 
 func (worker *Worker) RunReduceWorker() {
+	log.Println("Polling Coordinator for Reduce Task")
 	task, err := worker.CallGetReduceTask()
 	if err != nil {
 		log.Printf("Unable to fetch Reduce Task. Error: %v", err)
@@ -173,7 +175,7 @@ func (worker *Worker) CallNotifyCompletedMap(uid string) {
 func (worker *Worker) CallNotifyCompletedReduce(uid string) {
 	args := NotifyCompoletedArgs{Uid: uid, Worker: worker.Name}
 	reply := &Stub{}
-	log.Printf("Notifying Coordinator completion of Reduce task %v\n", uid)
+	log.Printf("Notifying Coordinator completion of Reduce Task %v\n", uid)
 
 	ok := call("Coordinator.NotifyCompletedReduce", &args, &reply)
 	if !ok {
@@ -185,6 +187,7 @@ type MapTask struct {
 	InputFile string
 	Reducers  int
 	Uid       string
+	Jid       string
 	Worker    string
 	Status    string
 }
