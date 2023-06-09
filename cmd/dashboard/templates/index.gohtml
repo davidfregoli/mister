@@ -72,7 +72,7 @@
 			<div class="container-fluid">
 				<a class="navbar-brand text-light" href="#">Mister - Distributed MapReduce Framework</a>
 				<div class="collapse navbar-collapse"></div>
-				<small class="version">v0.0.6</small>
+				<small class="version">v0.0.7</small>
 			</div>
 		</nav>
 		<div class="container">
@@ -183,7 +183,7 @@
 							});
 						modal.show();
 					}
-					if (node.startsWith("wordcount-")) {
+					if (node.includes("-mapper-") || node.includes("-reducer-")) {
 						const data = await $.getJSON("/api/logs/pod?podname=" + node);
 						const $logs = $("#logs");
 						$logs.empty();
@@ -205,10 +205,10 @@
 				if (!done) {
 					setTimeout(refresh, 500);
 				}
-			};
+			}
 			$("form").on("submit", async function (e) {
 				e.preventDefault();
-				const params =  $(this).serialize();
+				const params = $(this).serialize();
 				$("fieldset", this).prop("disabled", true);
 				await $.post(`/api/job?${params}`);
 				setTimeout(refresh, 500);

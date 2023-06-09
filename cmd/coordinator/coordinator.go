@@ -266,28 +266,6 @@ func (c *Coordinator) Shuffle() {
 	}
 }
 
-func (c *Coordinator) Cleanup() {
-	var config *rest.Config
-	for {
-		var err error
-		// creates the in-cluster config
-		config, err = rest.InClusterConfig()
-		if err != nil {
-			time.Sleep(time.Second)
-		} else {
-			break
-		}
-	}
-	// creates the clientset
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		panic(err.Error())
-	}
-	batchClient := clientset.BatchV1().Jobs("default")
-	batchClient.Delete(context.TODO(), "wordcount-mapper", meta.DeleteOptions{})
-	batchClient.Delete(context.TODO(), "wordcount-reducer", meta.DeleteOptions{})
-}
-
 func (c *Coordinator) SpawnMappers() {
 	var config *rest.Config
 	for {

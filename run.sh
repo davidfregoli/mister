@@ -13,3 +13,7 @@ cd ~/code/mister-wordcount
 CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o bin/mr-wordcount -a
 docker build . -t wordcount:1
 minikube image load wordcount:1
+cd ~/code/mister-indexer
+CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o bin/mr-indexer -a
+docker build . -t indexer:1
+minikube image load indexer:1
