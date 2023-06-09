@@ -34,27 +34,29 @@ func (worker *Worker) Run() {
 	if worker.Phase == "map" {
 		worker.RunMapLoop()
 	} else if worker.Phase == "reduce" {
-		worker.RunReduceLoop()
+		worker.RunReduceWorker()
 	}
 }
 
 func (worker *Worker) RunMapLoop() {
 	for {
 		task, found, done, err := worker.CallGetMapTask()
-		log.Println(task, found, done, err)
 		if err != nil {
-			log.Println(err)
+			log.Printf("Unable to fetch Map Task. Error: %v", err)
 			continue
 		}
 		if done {
+			log.Print("All Map Tasks completed. Shutting down worker")
 			break
 		}
 		if !found {
+			log.Print("No Map Task available. Trying again in one second")
 			time.Sleep(time.Second)
 			continue
 		}
+		log.Printf("Received Map Task %v (%v)", task.Uid, task.InputFile)
 		worker.RunMapTask(task)
-		time.Sleep(time.Second)
+		log.Printf("Completed Map Task %v", task.Uid)
 	}
 }
 
@@ -77,13 +79,15 @@ func (worker *Worker) RunMapTask(task MapTask) {
 	worker.CallNotifyCompletedMap(task.Uid)
 }
 
-func (worker *Worker) RunReduceLoop() {
-	task, found, done, err := worker.CallGetReduceTask()
-	log.Println(task, found, done, err)
+func (worker *Worker) RunReduceWorker() {
+	task, err := worker.CallGetReduceTask()
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("Unable to fetch Reduce Task. Error: %v", err)
 	}
+	log.Printf("Received Reduce Task %v (%v)", task.Uid, task.OutputFile)
 	worker.RunReduceTask(task)
+	log.Printf("Completed Reduce Task %v", task.Uid)
+	log.Print("Shutting down worker")
 }
 
 func (worker *Worker) RunReduceTask(task ReduceTask) {
@@ -144,21 +148,21 @@ func (worker *Worker) CallGetMapTask() (MapTask, bool, bool, error) {
 	return reply.MapTask, reply.Found, reply.Done, nil
 }
 
-func (worker *Worker) CallGetReduceTask() (ReduceTask, bool, bool, error) {
+func (worker *Worker) CallGetReduceTask() (ReduceTask, error) {
 	args := GetReduceTaskArgs{Worker: worker.Name}
 	reply := GetReduceTaskReply{}
 
 	ok := call("Coordinator.GetReduceTask", &args, &reply)
 	if !ok {
-		return ReduceTask{}, false, false, errors.New("cannot get reduce task from server")
+		return ReduceTask{}, errors.New("cannot get reduce task from server")
 	}
-	return reply.ReduceTask, reply.Found, reply.Done, nil
+	return reply.ReduceTask, nil
 }
 
 func (worker *Worker) CallNotifyCompletedMap(uid string) {
 	args := NotifyCompoletedArgs{Uid: uid, Worker: worker.Name}
 	reply := &Stub{}
-	log.Println("notifying ", uid)
+	log.Printf("Notifying Coordinator completion of Map task %v\n", uid)
 
 	ok := call("Coordinator.NotifyCompletedMap", &args, &reply)
 	if !ok {
@@ -169,7 +173,7 @@ func (worker *Worker) CallNotifyCompletedMap(uid string) {
 func (worker *Worker) CallNotifyCompletedReduce(uid string) {
 	args := NotifyCompoletedArgs{Uid: uid, Worker: worker.Name}
 	reply := &Stub{}
-	log.Println("notifying ", uid)
+	log.Printf("Notifying Coordinator completion of Reduce task %v\n", uid)
 
 	ok := call("Coordinator.NotifyCompletedReduce", &args, &reply)
 	if !ok {
