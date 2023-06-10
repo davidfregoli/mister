@@ -31,14 +31,12 @@ Writing a Mister App is straightforward:
 
 Example of a Wordcount App run with 4 mapper and 2 reducer workers:
 
-https://github.com/davidfregoli/mister/assets/64096305/2bff65a0-6063-435e-b216-6db0fd669104
+
+https://github.com/davidfregoli/mister/assets/64096305/ead41c05-52db-404e-bb41-68a0d6830f1d
 
 Example of a Indexer App run with 6 mapper and 3 reducer workers:
 
-https://github.com/davidfregoli/mister/assets/64096305/a11a83ad-c72a-48d0-b9ec-52717214b7eb
-
-[screen-capture (3).webm](https://github.com/davidfregoli/mister/assets/64096305/d506eb97-4e72-4073-8c07-d274043dbd63)
-[screen-capture (4).webm](https://github.com/davidfregoli/mister/assets/64096305/27e5f516-d64e-42dd-817c-36f4d46d5d7a)
+https://github.com/davidfregoli/mister/assets/64096305/6eb3ee29-a0d1-481c-ae5a-19bef08cd22f
 
 
 ## Limitations
