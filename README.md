@@ -37,8 +37,8 @@ Example of a Indexer App run with 6 mapper and 3 reducer workers:
 
 https://github.com/davidfregoli/mister/assets/64096305/a11a83ad-c72a-48d0-b9ec-52717214b7eb
 
-[screen-capture (1).webm](https://github.com/davidfregoli/mister/assets/64096305/a95adc21-a08a-4924-b7cd-c82cb5759886)
-
+[screen-capture (3).webm](https://github.com/davidfregoli/mister/assets/64096305/d506eb97-4e72-4073-8c07-d274043dbd63)
+[screen-capture (4).webm](https://github.com/davidfregoli/mister/assets/64096305/27e5f516-d64e-42dd-817c-36f4d46d5d7a)
 
 
 ## Limitations
