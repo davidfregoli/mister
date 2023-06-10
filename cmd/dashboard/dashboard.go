@@ -130,26 +130,11 @@ func getCoordinatorLogs(w http.ResponseWriter, r *http.Request) {
 
 func handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		panic(err.Error())
-	}
-	client, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		panic(err.Error())
-	}
-	pods, err := client.CoreV1().Pods("default").List(context.TODO(), meta.ListOptions{})
-	if err != nil {
-		panic(err.Error())
-	}
 	t, err := template.ParseFiles("templates/index.gohtml")
 	if err != nil {
 		panic(err)
 	}
-	// for _, pod := range pods.Items {
-	// 	fmt.Println("annotations: ", pod.GetAnnotations())
-	// }
-	err = t.Execute(w, pods)
+	err = t.Execute(w, struct{}{})
 	if err != nil {
 		panic(err)
 	}
