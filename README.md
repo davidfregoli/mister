@@ -39,6 +39,10 @@ https://github.com/davidfregoli/mister/assets/64096305/a11a83ad-c72a-48d0-b9ec-5
 
 
 
+https://github.com/davidfregoli/mister/assets/64096305/77952901-45b9-4433-b5c4-c257d82abcc1
+
+
+
 ## Limitations
 In order to manage the scope of the project, some architectural decisions are suboptimal or resemble antipatterns
 - Inherently runs on a single node
