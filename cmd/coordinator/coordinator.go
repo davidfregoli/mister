@@ -58,7 +58,6 @@ func main() {
 		log.Fatal("listen error:", e)
 	}
 	go http.Serve(l, nil)
-	c.MakeJob(&mr.MakeJobArgs{Mappers: 4, Reducers: 2, Path: "/files/", App: "wordcount"}, &mr.Stub{})
 	for {
 		time.Sleep(time.Minute)
 	}
