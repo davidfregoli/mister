@@ -34,7 +34,7 @@ Example of a Wordcount App run with 4 mapper and 2 reducer workers:
 
 https://github.com/davidfregoli/mister/assets/64096305/ead41c05-52db-404e-bb41-68a0d6830f1d
 
-Example of a Indexer App run with 6 mapper and 3 reducer workers:
+Example of a Indexer App run with 5 mapper and 3 reducer workers:
 
 https://github.com/davidfregoli/mister/assets/64096305/6eb3ee29-a0d1-481c-ae5a-19bef08cd22f
 
