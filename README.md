@@ -4,7 +4,7 @@ Repository for the Kubernetes runner and Library for MapReduce Mister Apps
 
 ---
 
-**Mister is a study project and as such is not intended to be used in real-world scenarios (see: [Limitations](#limitations))**
+**Mister is a study project and as such is not intended to be used in real-world scenarios (see:&nbsp;[Limitations](#limitations))**
 
 ---
 
